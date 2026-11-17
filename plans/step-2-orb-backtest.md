@@ -123,13 +123,22 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 
 The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Decided 2026-11-17: cash limit ON in the baseline** (a real $5k account without margin can usually hold only one ~$3,500 position at a time). Reports still show the cash-off view next to it. Step 1b enforces the same $5k cash rule on the paper account, so live paper results stay comparable.
 
-### 2.5 Runs + reports
+### 2.5 Runs + reports ✅
 - `python -m app backtest --from 2024-11-01 --to 2026-11-16 [--set exit.target=1R] [--label "…"]`
 - Saved to the trade log (`source = backtest`) with settings and git commit
 - Report: trades, win rate, average R, **expectancy** (average result per trade, in R and $, after costs), profit factor, max drawdown, by month, by entry time; both views (a) and (b); comparison with the baseline
 - The blind spots are listed in every report
 
 **Done when:** baseline run #1 has a report.
+
+**As built** ([app/backtest/run.py](../app/backtest/run.py), [report.py](../app/backtest/report.py)): one command, ~2 minutes for 2 years. `--set` changes any setting for one run (typos are refused); each run is saved in `data/backtests.db` with its settings and commit, plus `data/backtests/run-<id>.md` (report) and `.json` (numbers). Each run is compared with the latest run labeled `baseline`.
+
+**Baseline run #1** (commit `6d1a3f6`, 2024-11-01 → 2026-11-17, cash limit on): **683 trades, −0.038R a trade after costs (−$0.95), total −$650, worst drawdown −$1,664**
+- Before costs it's slightly positive (**+0.018R**); the assumed 0.03%/side costs turn it negative
+- Win rate 42%; average winner +1.16R, average loser −0.90R; profit factor 0.95
+- 116 targets, 308 stops, 259 flat; 43% reached +1R and 17% reached +2R before exiting
+- Months swing between about −0.47R and +0.56R a trade; no steady edge
+- Every signal taken: −0.082R (cash limit off: −0.043R)
 
 ### 2.6 `#backtests` channel
 - One short summary per run, compared with the baseline
