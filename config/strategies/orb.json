@@ -1,0 +1,28 @@
+{
+  "id": "orb",
+  "name": "Opening Range Breakout",
+  "enabled": true,
+  "interval": "5m",
+  "opening_range_minutes": 15,
+  "focus_list": {
+    "top_n_by_dollar_volume": 150,
+    "min_price": 5,
+    "include_daily_scan_hits": true
+  },
+  "scan_window": {
+    "start": "09:50",
+    "end": "11:30"
+  },
+  "min_volume_x": 1.0,
+  "exit": {
+    "stop": "or-mid",
+    "target": "2R"
+  },
+  "alerts": {
+    "max_per_day": 5,
+    "require_risk_pass": true
+  },
+  "timemachine": {
+    "enabled": true
+  }
+}

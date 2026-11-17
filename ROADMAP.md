@@ -21,7 +21,7 @@ no orders        paper orders         no orders        paper orders    paper ord
 
 | Step | Name | Status |
 |---|---|---|
-| 1a | Alerts + trade log | ⬜ Not started |
+| 1a | Alerts + trade log | 🟨 In progress |
 | 1b | One-tap approval → paper orders | ⬜ Not started |
 | 2 | Backtest #1 (baseline) | ⬜ Not started |
 | 3 | Claude filter + Backtest #2 | ⬜ Not started |

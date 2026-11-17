@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Not started
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -65,7 +65,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 ## Sub-steps
 
-### 1a.1 Project skeleton
+### 1a.1 Project skeleton ✅
 - `app/` Python package; dependencies (`discord.py`, `alpaca-py`, `python-dotenv`)
 - `.env.example` (Alpaca paper keys, Discord token, channel IDs, your Discord user ID)
 - Settings files: `config/risk.json` (shared rules) and `config/strategies/orb.json` (ORB bot settings)
