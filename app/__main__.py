@@ -257,6 +257,19 @@ def cmd_backtest(a) -> int:
         bm = res.baseline[2]
         print(f"  vs baseline run #{res.baseline[0]}: {m['avg_r'] - bm['avg_r']:+.3f}R a trade")
     print(f"Report: {res.report_path}")
+    if not a.no_post:
+        from app.backtest import post
+        print("Posted to #backtests." if post.post(res.run_id) else
+              "Not posted (set DISCORD_CHANNEL_BACKTESTS in .env to post runs to Discord).")
+    return 0
+
+
+def cmd_backtest_post(a) -> int:
+    from app.backtest import post
+    if not post.post(a.run):
+        print("DISCORD_CHANNEL_BACKTESTS isn't set in .env.")
+        return 1
+    print(f"Posted run #{a.run} to #backtests.")
     return 0
 
 
@@ -289,8 +302,13 @@ def main(argv=None) -> int:
     bt.add_argument("--set", action="append", metavar="KEY=VALUE",
                     help="change a setting for this run only, e.g. exit.target=1R, risk.max_trades_per_day=2, "
                          "selection.cash_limit=false (repeatable)")
+    bt.add_argument("--no-post", action="store_true", help="don't post the summary to #backtests")
+    bp = sub.add_parser("backtest-post", help="(re)post a backtest run's summary to #backtests")
+    bp.add_argument("--run", type=int, required=True)
     sub.add_parser("check", help="Alpaca + Discord connection check")
     a = p.parse_args(argv)
+    if a.cmd == "backtest-post":
+        return cmd_backtest_post(a)
     if a.cmd == "backtest":
         return cmd_backtest(a)
     if a.cmd == "backtest-data":

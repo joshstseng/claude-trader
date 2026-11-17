@@ -383,17 +383,21 @@ class DiscordErrorHandler(logging.Handler):
 
 
 async def post_once(cfg: DiscordSettings, channel_id: int,
-                    messages: list[tuple[str, discord.Embed | None, discord.ui.View | None]]) -> list[int]:
-    """Post without connecting to the gateway (for replays). Button taps are handled by the
-    running app (`python -m app run`), which knows these button ids."""
+                    messages: list[tuple[str, discord.Embed | None, discord.ui.View | None]],
+                    files: list | None = None) -> list[int]:
+    """Post without connecting to the gateway (replays, backtests). Button taps are handled by the
+    running app (`python -m app run`), which knows these button ids. `files` (paths) are attached
+    to the last message."""
     client = discord.Client(intents=discord.Intents(guilds=True))
     ids = []
     async with client:
         await client.login(cfg.bot_token)
         ch = await client.fetch_channel(channel_id)
-        for content, embed, view in messages:
+        for i, (content, embed, view) in enumerate(messages):
             kwargs = {"embed": embed} if embed else {}
             if view:
                 kwargs["view"] = view
+            if files and i == len(messages) - 1:
+                kwargs["files"] = [discord.File(str(f)) for f in files]
             ids.append((await ch.send(content, **kwargs)).id)
     return ids

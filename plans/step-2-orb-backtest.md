@@ -1,6 +1,6 @@
 # Step 2: ORB bot backtest framework
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (started 2026-11-17, alongside the Step 1a live gate)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 Framework done (2.1–2.6 ✅) · variations in progress
 
 **Goal:** replay the exact ORB bot rules over ~2 years of history, assuming you approve every alert. Save each run so any two runs can be compared, and post a short summary of each run to `#backtests`.
 
@@ -140,11 +140,13 @@ The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Decided
 - Months swing between about −0.47R and +0.56R a trade; no steady edge
 - Every signal taken: −0.082R (cash limit off: −0.043R)
 
-### 2.6 `#backtests` channel
+### 2.6 `#backtests` channel ✅
 - One short summary per run, compared with the baseline
 - Uses `DISCORD_CHANNEL_BACKTESTS` (only needed on the Mac, where backtests run)
 
 **Done when:** a run summary shows up on your phone.
+
+**As built** ([app/backtest/post.py](../app/backtest/post.py)): every `python -m app backtest` run posts its summary to `#backtests` (`--no-post` to skip), with the full report attached: trades, win rate, R and $ a trade, total, drawdown, what was changed, and the difference from the baseline. `python -m app backtest-post --run N` reposts any run. Baseline run #1 posted 2026-11-17.
 
 ---
 

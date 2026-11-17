@@ -85,6 +85,17 @@ def discord_settings() -> DiscordSettings:
     )
 
 
+def discord_backtests_channel() -> int | None:
+    """Optional: #backtests (only needed where backtests run). None = don't post."""
+    value = os.environ.get("DISCORD_CHANNEL_BACKTESTS", "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise SettingsError("DISCORD_CHANNEL_BACKTESTS should be a number (a Discord channel ID).") from None
+
+
 def sec_user_agent() -> str | None:
     """Optional: without it the news step skips SEC filings (the skill says so)."""
     return os.environ.get("SEC_USER_AGENT", "").strip() or None
