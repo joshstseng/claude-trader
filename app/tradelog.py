@@ -20,11 +20,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from app import paths
+from app.outcomes import Outcome
 from app.pipeline import SignalResult
 
 DEFAULT_DB = paths.DATA_DIR / "tradelog.db"
 SOURCES = ("live", "replay", "backtest")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -104,6 +105,12 @@ CREATE TABLE IF NOT EXISTS outcomes (
 );
 """
 
+# columns added after the first version (added to existing databases on open)
+MIGRATIONS = {
+    "outcomes": [("r_gross", "REAL"), ("cost_usd", "REAL"), ("mfe_r", "REAL"), ("mae_r", "REAL"),
+                 ("bars_held", "INTEGER")],
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -144,6 +151,11 @@ class TradeLog:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            for name, kind in cols:
+                if name not in have:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.db.commit()
 
@@ -307,6 +319,22 @@ class TradeLog:
             " r_multiple = excluded.r_multiple, pnl_usd = excluded.pnl_usd, method = excluded.method,"
             " resolved_at = excluded.resolved_at",
             (signal_id, result, exit_price, exit_time, r_mult, pnl, method, _now()))
+        self.db.commit()
+
+    def save_outcome(self, signal_id: int, o: "Outcome") -> None:
+        """Save an outcome from app.outcomes.resolve (R and $ already include costs)."""
+        if self.signal(signal_id) is None:
+            raise ValueError(f"no signal {signal_id}")
+        self.db.execute(
+            "INSERT INTO outcomes (signal_id, result, exit_price, exit_time, r_multiple, pnl_usd, method,"
+            " resolved_at, r_gross, cost_usd, mfe_r, mae_r, bars_held)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (signal_id) DO UPDATE SET"
+            " result = excluded.result, exit_price = excluded.exit_price, exit_time = excluded.exit_time,"
+            " r_multiple = excluded.r_multiple, pnl_usd = excluded.pnl_usd, method = excluded.method,"
+            " resolved_at = excluded.resolved_at, r_gross = excluded.r_gross, cost_usd = excluded.cost_usd,"
+            " mfe_r = excluded.mfe_r, mae_r = excluded.mae_r, bars_held = excluded.bars_held",
+            (signal_id, o.result, o.exit_price, o.exit_time, o.r_net, o.pnl_usd, o.method, _now(),
+             o.r_gross, o.cost_usd, o.mfe_r, o.mae_r, o.bars_held))
         self.db.commit()
 
     def outcome(self, signal_id: int) -> sqlite3.Row | None:

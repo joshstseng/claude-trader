@@ -49,13 +49,20 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 
 ## Sub-steps
 
-### 2.1 Outcome engine *(shared with 1a.7)*
+### 2.1 Outcome engine *(shared with 1a.7)* ✅
 - Plan + bars after entry → `target` / `stop` / `flat` (3:55 PM), exit price and time, R, dollars
 - Stop and target inside the same bar → counted as a stop (conservative)
 - Costs applied per side
 - Used by the backtest **and** by the live bot after the close (1a.7)
 
 **Done when:** tests pass on hand-made bars (target first, stop first, both in one bar, neither, early close) and on TSLA Oct 19.
+
+**As built** ([app/outcomes.py](../app/outcomes.py)):
+- A gap below the stop fills at the bar's open (worse than the stop), as a real stop order would; the target fills at the target price
+- Also records **MFE / MAE** (best and worst move before the exit, in R). This lets us see what a different target would have done, e.g. "how many 2R losers reached 1R first?"
+- Trade log: new outcome columns (gross R, cost, MFE, MAE, bars held), added automatically to existing databases (including Railway's)
+- TSLA Oct 19 (Alpaca bars): the v1 signal went **flat** at 3:55 PM, +0.17R after costs. Best +0.52R, never near the stop
+- Found while building it: **Alpaca and Yahoo report very different 5-minute volume** (TSLA 10:30 bar: 0.4× vs 7.98× the range average). Prices match. This affects the volume filter, so it gets measured in 2.3
 
 ### 2.2 Historical data
 - Alpaca 5-minute bars (SIP) for each day's focus list; daily bars for the whole stock list
