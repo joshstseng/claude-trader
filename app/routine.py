@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from app import market, paths, pipeline, tradelog
 from app.strategies import Strategy
@@ -113,7 +113,8 @@ class OrbDay:
         self.log, self.source, self.day = trade_log, source, day
         self.alerter, self.runs_root, self.day_data = alerter, runs_root, day_data
         self.sec_user_agent = sec_user_agent
-        self.paused = False
+        self._paused = False
+        self.pause_source: Callable[[], bool] | None = None   # e.g. the app's /pause setting
         self.focus: list[str] = []
         self.done: set[str] = set()       # signaled, expired or failed for good today
         self.signal_ids: dict[str, int] = {}
@@ -121,6 +122,14 @@ class OrbDay:
         self.run_id = trade_log.start_run(
             strategy.id, source, {"strategy": strategy.settings, "risk": rules},
             label=f"ORB {source} {day}", date_from=day, date_to=day)
+
+    @property
+    def paused(self) -> bool:
+        return self._paused or bool(self.pause_source and self.pause_source())
+
+    @paused.setter
+    def paused(self, value: bool) -> None:
+        self._paused = bool(value)
 
     # ---------------------------------------------------------------- pre-market
 
@@ -183,7 +192,7 @@ class OrbDay:
 
             def decide(res: pipeline.SignalResult) -> tuple[bool, str | None]:
                 return decide_alert(res, settings=self.s, paused=self.paused, sent_today=self.log.alerts_sent(
-                    strategy=self.strategy.id, date=self.day, source=self.source))
+                    strategy=self.strategy.id, date=self.day, source=self.source, run_id=self.run_id))
 
             # the slow time machine and news only run for a signal that will be alerted
             result = pipeline.run_signal(self.strategy, sym, self.rules, now=now, offline=offline,

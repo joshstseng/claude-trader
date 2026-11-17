@@ -21,3 +21,4 @@ def setup(level: int = logging.INFO) -> None:
         root.addHandler(h)
     root.setLevel(level)
     logging.getLogger("discord").setLevel(logging.WARNING)
+    logging.getLogger("discord.client").setLevel(logging.ERROR)   # "voice not supported" noise

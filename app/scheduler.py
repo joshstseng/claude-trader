@@ -1,7 +1,7 @@
 """Runs the ORB bot's day on a clock: pre-market at 8:30, checks every 5 minutes in the scan window,
 after-close at 4:15 PM. The same code runs live (real clock) and replays (simulated clock).
 
-Heavy work (scripts, downloads) runs in a worker thread so the Discord bot (1a.6) stays responsive.
+Heavy work (scripts, downloads) runs in a worker thread so the Discord bot stays responsive.
 """
 
 from __future__ import annotations
@@ -13,9 +13,11 @@ from typing import Awaitable, Callable
 
 from app import market
 from app.routine import OrbDay
+from app.state import AppState
 
 log = logging.getLogger(__name__)
 NY = market.NY
+Notify = Callable[[str], Awaitable[None]]
 
 
 class RealClock:
@@ -46,26 +48,53 @@ def _hhmm(text: str) -> dtime:
     return dtime.fromisoformat(text)
 
 
+async def _say(notify: Notify | None, text: str) -> None:
+    if notify:
+        try:
+            await notify(text)
+        except Exception:  # noqa: BLE001 - a failed message never stops the day
+            log.exception("could not post: %s", text)
+
+
 async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated: bool,
-                  focus: list[str] | None = None,
+                  focus: list[str] | None = None, state: AppState | None = None,
+                  notify: Notify | None = None,
                   after_close: Callable[[OrbDay], Awaitable[None]] | None = None) -> None:
-    """One trading day. Steps whose time has already passed are skipped, except the focus list,
-    which is built right away when the app starts late."""
+    """One trading day. Checks whose time has passed are skipped (a later check catches up).
+    If the app starts after the scan window, the focus list isn't built at all."""
     s = day_bot.s
     as_arg = (lambda t: t.strftime("%Y-%m-%d %H:%M")) if simulated else (lambda t: None)
+    times = [t for t in market.check_times(session, s) if clock.now() <= t + timedelta(minutes=2)]
+    if state:
+        state.day, state.session = day_bot, session
 
-    pre = session.at(_hhmm(s["schedule"]["premarket_at"]))
-    await clock.sleep_until(pre)
-    await asyncio.to_thread(day_bot.premarket, focus)
+    if times:
+        pre = session.at(_hhmm(s["schedule"]["premarket_at"]))
+        await clock.sleep_until(pre)
+        await asyncio.to_thread(day_bot.premarket, focus)
+        await _say(notify, f"📋 **[ORB]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
+                           f"{s['schedule']['check_every_minutes']} min, {times[0]:%-I:%M}–{times[-1]:%-I:%M %p} ET.")
+    else:
+        log.info("[ORB] started after the scan window; no checks today")
 
-    for t in market.check_times(session, s):
-        if clock.now() > t + timedelta(minutes=2):
-            continue                      # missed (app started late); a later check catches up
+    for t in times:
+        if state:
+            state.next_check = t
         await clock.sleep_until(t)
         try:
-            await asyncio.to_thread(day_bot.tick, as_arg(t))
+            report = await asyncio.to_thread(day_bot.tick, as_arg(t))
+            if state:
+                state.last_report = report
         except Exception:                 # noqa: BLE001 - one bad check must not end the day
             log.exception("[ORB] check at %s failed", t.strftime("%H:%M"))
+    if state:
+        state.next_check = None
+
+    if times:
+        sigs = day_bot.log.signals(run_id=day_bot.run_id)
+        sent = day_bot.log.alerts_sent(strategy=day_bot.strategy.id, date=day_bot.day, source=day_bot.source,
+                                       run_id=day_bot.run_id)
+        await _say(notify, f"🏁 **[ORB]** scan window closed: {len(sigs)} signals, {sent} alerts today.")
 
     close_at = session.at(_hhmm(s["schedule"]["after_close_at"]))
     if session.early_close:
@@ -76,17 +105,20 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
     day_bot.finish()
 
 
-async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealClock,
-                      after_close=None, on_closed_day: Callable[[date], Awaitable[None]] | None = None):
+async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealClock, *,
+                      state: AppState | None = None, notify: Notify | None = None, after_close=None):
     """Live: run every market day, sleep through nights, weekends and holidays."""
     while True:
         now = clock.now()
-        session = calendar.session(now.date())
+        session = await asyncio.to_thread(calendar.session, now.date())
+        if state:
+            state.session, state.day = session, None
         if session and now < session.at(session.close):
             day_bot = make_day(now.date().isoformat())
-            await run_day(day_bot, session, clock, simulated=False, after_close=after_close)
-        elif session is None and on_closed_day:
-            await on_closed_day(now.date())
+            await run_day(day_bot, session, clock, simulated=False, state=state, notify=notify,
+                          after_close=after_close)
+        elif session is None and now.weekday() < 5:
+            await _say(notify, f"🏖️ Market closed today ({now:%a %b %-d}). See you next market day.")
         tomorrow = datetime.combine(now.date() + timedelta(days=1), dtime(7, 0), tzinfo=NY)
         log.info("Sleeping until %s", tomorrow.strftime("%a %Y-%m-%d %H:%M"))
         await clock.sleep_until(tomorrow)

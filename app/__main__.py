@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import signal
 import tempfile
 from datetime import date, datetime, time as dtime
 from pathlib import Path
@@ -21,6 +23,7 @@ from pathlib import Path
 from app import logs, market, paths, settings, strategies, tradelog
 from app.routine import DayData, LogAlerter, OrbDay
 from app.scheduler import RealClock, SimClock, run_day, run_forever
+from app.state import AppState
 
 
 def show() -> int:
@@ -36,24 +39,87 @@ def show() -> int:
     return 0
 
 
+async def live(dcfg, calendar, make_day, state) -> None:
+    """The Discord bot and the scheduler, side by side in one loop."""
+    from app.discord_bot import DiscordAlerter, DiscordErrorHandler, TraderBot
+
+    bot = TraderBot(dcfg, state)
+    logging.getLogger().addHandler(DiscordErrorHandler(bot))
+    loop = asyncio.get_running_loop()
+    me = asyncio.current_task()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, me.cancel)
+    async with bot:
+        bot_task = asyncio.create_task(bot.start(dcfg.bot_token))
+        ready = asyncio.create_task(bot.ready.wait())
+        await asyncio.wait({bot_task, ready}, return_when=asyncio.FIRST_COMPLETED)
+        if bot_task.done():
+            bot_task.result()          # login failed: raise the reason
+        alerter = DiscordAlerter(bot, loop)
+
+        def make(day: str) -> OrbDay:
+            d = make_day(day, alerter)
+            d.pause_source = lambda: state.paused
+            return d
+
+        await bot.post_system("🟢 **ORB bot online** · paper · alerts only, no orders (Step 1a)"
+                              + (" · ⏸️ still **paused** (`/resume` to turn alerts on)" if state.paused else ""))
+        sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
+                                                notify=bot.post_system))
+        try:
+            done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)
+            for t in done:
+                t.result()
+        except asyncio.CancelledError:
+            logging.getLogger("app").info("Stopping")
+            try:
+                await asyncio.wait_for(bot.post_system("🔴 **ORB bot stopped.** No alerts until it's started again."), 10)
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            sched.cancel()
+
+
+def single_instance():
+    """Refuse to start a second copy (two copies would send every alert twice).
+    The lock is released automatically when the process exits, even after a crash."""
+    import fcntl
+    paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    f = open(paths.DATA_DIR / "app.lock", "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.seek(0)
+        print(f"Another copy of the app is already running (pid {f.read().strip() or '?'}). Not starting.")
+        raise SystemExit(1)
+    f.seek(0)
+    f.truncate()
+    f.write(str(os.getpid()))
+    f.flush()
+    return f   # keep it open for the life of the process
+
+
 def cmd_run(a) -> int:
     from alpaca.trading.client import TradingClient
+    lock = single_instance()  # noqa: F841 - held until exit
     logs.setup()
     rules = settings.risk_rules()
     orb = strategies.load("orb")
     al = settings.alpaca_settings()
+    dcfg = settings.discord_settings()
     calendar = market.AlpacaCalendar(TradingClient(al.api_key, al.secret_key, paper=True))
     trade_log = tradelog.TradeLog()
-    alerter = LogAlerter()   # Discord arrives in 1a.6
+    state = AppState(started_at=datetime.now(market.NY))
 
-    def make_day(day: str) -> OrbDay:
+    def make_day(day: str, alerter) -> OrbDay:
         return OrbDay(orb, rules, trade_log, source="live", day=day, alerter=alerter,
                       sec_user_agent=settings.sec_user_agent())
 
     try:
-        asyncio.run(run_forever(make_day, calendar, RealClock()))
-    except KeyboardInterrupt:
-        logging.getLogger("app").info("Stopped by you (Ctrl-C)")
+        asyncio.run(live(dcfg, calendar, make_day, state))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    logging.getLogger("app").info("Stopped")
     return 0
 
 
@@ -76,7 +142,8 @@ def cmd_replay(a) -> int:
         if bundle.is_file():
             market.split_bundle(bundle, entry_dir)
         day_data = DayData(bars=bundle, entry_dir=entry_dir,
-                           timemachine_dir=Path(a.timemachine_dir) if a.timemachine_dir else None)
+                           timemachine_dir=Path(a.timemachine_dir) if a.timemachine_dir else None,
+                           news_dir=Path(a.news_dir) if a.news_dir else None)
     focus = [s.strip().upper() for s in a.symbols.split(",")] if a.symbols else None
     if focus is None and day_data is None:
         print("A replay from Yahoo needs --symbols (the focus list can't be rebuilt for a past day).")
@@ -86,6 +153,18 @@ def cmd_replay(a) -> int:
                      runs_root=runs_root, day_data=day_data, sec_user_agent=settings.sec_user_agent())
     clock = SimClock(datetime.combine(day, dtime(7, 0), tzinfo=market.NY))
     asyncio.run(run_day(day_bot, session, clock, simulated=True, focus=focus))
+
+    if a.discord and alerter.sent:
+        from app.discord_bot import alert_message, decision_view, post_once
+        dcfg = settings.discord_settings()
+        msgs = []
+        for sid, res in alerter.sent:
+            preview, embed = alert_message(sid, "replay", res)
+            msgs.append((preview, embed, decision_view("replay", sid)))
+        ids = asyncio.run(post_once(dcfg, dcfg.channel_setups, msgs))
+        for (sid, _), mid in zip(alerter.sent, ids):
+            trade_log.record_alert(sid, sent=True, channel_id=dcfg.channel_setups, message_id=mid)
+        print(f"Posted {len(ids)} replay alerts to #setups. Buttons work while `python -m app run` is running.")
 
     rows = trade_log.signals(run_id=day_bot.run_id)
     print(f"\nReplay of {day} (run {day_bot.run_id}, saved in {db.relative_to(paths.REPO_ROOT)}):")
@@ -107,8 +186,10 @@ def main(argv=None) -> int:
     r.add_argument("--date", required=True, help="YYYY-MM-DD")
     r.add_argument("--offline", help="saved 5m bars: a {TICKER: chart} bundle or a folder of <TICKER>.json")
     r.add_argument("--timemachine-dir", help="folder of <TICKER>.json(.gz) with ~60 days of 5m bars")
+    r.add_argument("--news-dir", help="folder of saved headlines / filings (trader-news format)")
     r.add_argument("--symbols", help="comma-separated focus list (default: every ticker in --offline)")
     r.add_argument("--db", help="trade log file (default data/replays.db)")
+    r.add_argument("--discord", action="store_true", help="also post the alerts to #setups (marked REPLAY)")
     sub.add_parser("check", help="Alpaca + Discord connection check")
     a = p.parse_args(argv)
     if a.cmd == "run":

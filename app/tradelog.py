@@ -247,12 +247,16 @@ class TradeLog:
              None if message_id is None else str(message_id), _now()))
         self.db.commit()
 
-    def alerts_sent(self, *, strategy: str, date: str, source: str = "live") -> int:
-        """How many alerts went out today (for the daily alert cap)."""
-        return self.db.execute(
-            "SELECT COUNT(*) FROM alerts a JOIN signals s ON s.id = a.signal_id"
-            " WHERE a.sent = 1 AND s.strategy = ? AND s.date = ? AND s.source = ?",
-            (strategy, date, source)).fetchone()[0]
+    def alerts_sent(self, *, strategy: str, date: str, source: str = "live", run_id: int | None = None) -> int:
+        """How many alerts went out on a day. With run_id, only that run's (the daily cap counts per
+        run, so replaying the same day twice doesn't share one cap)."""
+        sql = ("SELECT COUNT(*) FROM alerts a JOIN signals s ON s.id = a.signal_id"
+               " WHERE a.sent = 1 AND s.strategy = ? AND s.date = ? AND s.source = ?")
+        args: list = [strategy, date, source]
+        if run_id is not None:
+            sql += " AND s.run_id = ?"
+            args.append(run_id)
+        return self.db.execute(sql, args).fetchone()[0]
 
     def alert(self, signal_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM alerts WHERE signal_id = ?", (signal_id,)).fetchone()

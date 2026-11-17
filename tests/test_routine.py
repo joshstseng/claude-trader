@@ -133,6 +133,13 @@ class ReplayDayTest(unittest.TestCase):
         self.assertEqual(self.log.alert(row["id"])["sent"], 1)
         self.assertIsNotNone(row["tm_verdict"])                   # from saved data, no network
 
+    def test_daily_cap_counts_per_run(self):
+        """Replaying the same day twice: the second run gets its own cap of 5."""
+        for _ in range(2):
+            bot = self.bot()
+            bot.premarket(["CDNS"])
+            self.assertEqual(bot.tick("2026-10-19 09:51").alerted, ["CDNS"])
+
     def test_late_start_logs_but_does_not_alert_stale_triggers(self):
         bot = self.bot()
         bot.premarket(["CDNS"])                                   # broke out at 9:50

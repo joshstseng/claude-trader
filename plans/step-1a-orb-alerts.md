@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅ 1a.5 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅ 1a.5 ✅ 1a.6 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -112,7 +112,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 - Commands: `python -m app run` (live), `python -m app replay --date … --offline …` (saved data) or `--symbols …` (recent days from Yahoo). Replays go to `data/replays.db`, never the live log.
 - Oct 19 full-day replay (234 stocks, saved data): 16 signals in ~16 s; 5 alerted by 9:55, the rest held by the daily cap.
 
-### 1a.6 Discord bot (built into the app)
+### 1a.6 Discord bot (built into the app) ✅
 - **Alert in `#setups`:**
   - `[ORB]` tag, ticker, opening range, trigger time and price
   - Stop, target, reward-to-risk, shares and max loss in dollars
@@ -123,6 +123,16 @@ All of these live in settings files, not in code, so the backtest can vary them.
 - **`#system`:** startup, health ping, errors
 
 **Done when:** replay alerts show up on your phone and button taps are saved.
+
+**As built:**
+- Alert card made for phones: a one-line preview (what the notification shows), then the numbers in one aligned block (entry, stop −%, target +% and R, size, risk), one line each for the risk check, odds and news. Empty sections are left out.
+- [Took it] [Skip]: the tapped one stays highlighted, "Your call" line at the bottom, last tap counts. Button ids carry the source and signal id, so taps work after a restart and replay taps go to the replay log.
+- `#system`: online / stopped, focus list ready, scan window closed, errors (with an @mention, at most one a minute), market closed on weekday holidays.
+- `/pause` is saved to `data/state.json`, so it survives a restart. Signals are still logged while paused.
+- Only one copy of the app can run at a time (lock file), so alerts are never sent twice. SIGTERM / Ctrl-C shut down cleanly.
+- `python -m app replay … --discord` posts replay alerts (grey, marked REPLAY).
+- The daily alert cap counts per run (one live day = one run).
+- Tested on the phone 2026-11-17: 3 replay alerts, 9 taps saved (including changed minds), across an app restart.
 
 ### 1a.7 After the close
 - For **every** signal (alerted or not), work out what it would have done from the 5-minute bars:
