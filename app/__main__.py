@@ -92,7 +92,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         async def after_close(day_bot: OrbDay) -> None:
             await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
                                       run_id=day_bot.run_id,
-                                      scanned=day_bot.checks > 0 or day_bot.resumed)
+                                      scanned=day_bot.scanned_today)
 
         async def catch_up(day: str, session) -> None:
             await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)

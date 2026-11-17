@@ -135,6 +135,12 @@ class OrbDay:
             self.resumed = False
 
     @property
+    def scanned_today(self) -> bool:
+        """Did the bot check for breakouts today? (This process ran a check, or an earlier copy
+        built today's focus list, which only happens on days the checks are scheduled.)"""
+        return self.checks > 0 or (self.workdir / "focus_symbols.json").exists()
+
+    @property
     def paused(self) -> bool:
         return self._paused or bool(self.pause_source and self.pause_source())
 
