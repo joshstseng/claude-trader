@@ -204,7 +204,7 @@ class OrbDay:
         hits, note = self._orb_scan(todo, now)
         if note:
             report.note = note
-            log.warning("[ORB] scan at %s: %s", report.at, note)
+            log.error("[ORB] check at %s couldn't scan: %s", report.at, note)   # pings you in #system
             return report
         report.candidates = [h["symbol"] for h in hits]
         for h in hits:

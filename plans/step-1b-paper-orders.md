@@ -57,7 +57,8 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 
 ### 1b.3 Simulated $5k account + real risk state
 - `portfolio.json` (cash, open positions) and today's placed orders kept up to date for `check.py`, so it enforces **3 trades a day, the $150 daily loss limit and the cash limit** on real entries
-- Account resets each morning (day trades only, nothing held overnight)
+- **Account resets to $5,000 every morning** (decided 2026-11-17): each day is independent, like the backtest. Nothing is held overnight
+- **But every execution is kept forever** (your requirement): each order, fill and exit with its P&L in the trade log, plus a **running total P&L** across all days in the daily summary and a `/pnl` command
 
 **Done when:** `check.py` blocks a 4th trade, a trade over the daily loss limit and a trade the cash can't cover, in tests.
 
@@ -74,7 +75,7 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 ### 1b.5 Tracking fills and exits
 - Alpaca's live trade updates (stream): entry fills, partial fills, stop hits, target hits
 - Posts to **`#trades`**: filled, stopped ❌, target ✅, flattened ➖, with real P&L
-- Trade log: new `orders` / `fills` records. **Slippage** = fill price vs plan price, on entry and exit
+- Trade log: new `orders` / `fills` records (every execution, kept forever, with its P&L). **Slippage** = fill price vs plan price, on entry and exit
 
 **Done when:** every state change of a paper trade shows up in `#trades` and the log.
 

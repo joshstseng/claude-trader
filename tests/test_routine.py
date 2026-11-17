@@ -133,6 +133,25 @@ class ReplayDayTest(unittest.TestCase):
         self.assertEqual(self.log.alert(row["id"])["sent"], 1)
         self.assertIsNotNone(row["tm_verdict"])                   # from saved data, no network
 
+    def test_focus_list_failure_doesnt_crash_the_day(self):
+        """Yahoo down at 8:30: retried, then an ERROR (which pings #system), no checks, the day still ends."""
+        from unittest import mock
+        bot = self.bot()
+        closed = []
+
+        async def after_close(b):
+            closed.append(b.day)
+
+        session = market.SkillCalendar().session(DAY)
+        clock = SimClock(datetime.combine(DAY, dtime(7, 0), tzinfo=market.NY))
+        with mock.patch.object(bot, "premarket", side_effect=RuntimeError("Yahoo said 429")) as pm, \
+                self.assertLogs("app.scheduler", level="ERROR") as logs:
+            asyncio.run(run_day(bot, session, clock, simulated=True, focus=FOCUS, after_close=after_close))
+        self.assertEqual(pm.call_count, 3)
+        self.assertIn("couldn't build today's focus list", logs.output[0])
+        self.assertEqual(bot.checks, 0)
+        self.assertEqual(closed, ["2026-10-19"])
+
     def test_daily_cap_counts_per_run(self):
         """Replaying the same day twice: the second run gets its own cap of 5."""
         for _ in range(2):

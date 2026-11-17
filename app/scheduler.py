@@ -18,6 +18,7 @@ from app.state import AppState
 log = logging.getLogger(__name__)
 NY = market.NY
 Notify = Callable[[str], Awaitable[None]]
+PREMARKET_TRIES, PREMARKET_RETRY_S = 3, 120
 
 
 class RealClock:
@@ -72,9 +73,21 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
     if times:
         pre = session.at(_hhmm(s["schedule"]["premarket_at"]))
         await clock.sleep_until(pre)
-        await asyncio.to_thread(day_bot.premarket, focus)
-        await _say(notify, f"📋 **[ORB]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
-                           f"{s['schedule']['check_every_minutes']} min, {times[0]:%-I:%M}–{times[-1]:%-I:%M %p} ET.")
+        for attempt in range(1, PREMARKET_TRIES + 1):      # e.g. Yahoo blocking or down: retry, then give up loudly
+            try:
+                await asyncio.to_thread(day_bot.premarket, focus)
+                break
+            except Exception:  # noqa: BLE001
+                if attempt == PREMARKET_TRIES:
+                    log.exception("[ORB] couldn't build today's focus list after %d tries: no checks today",
+                                  PREMARKET_TRIES)
+                    times = []
+                    break
+                log.warning("[ORB] focus list failed (try %d), retrying in %ds", attempt, PREMARKET_RETRY_S)
+                await asyncio.sleep(0 if simulated else PREMARKET_RETRY_S)
+        if times:
+            await _say(notify, f"📋 **[ORB]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
+                               f"{s['schedule']['check_every_minutes']} min, {times[0]:%-I:%M}–{times[-1]:%-I:%M %p} ET.")
     else:
         log.info("[ORB] started after the scan window; no checks today")
 
