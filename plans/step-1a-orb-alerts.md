@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -81,7 +81,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** the check command prints Alpaca's market clock and posts "hello" in `#system`.
 
-### 1a.3 Pipeline wrapper
+### 1a.3 Pipeline wrapper ✅
 - One function takes a signal through entry → exit → Time Machine → budget → risk → news, in its own folder
 - Reads each script's JSON output; a step that fails gets logged with the reason and doesn't crash the app
 - **Replay mode:** runs on the repo's saved data with a fixed clock (`--offline`, `--now`)
