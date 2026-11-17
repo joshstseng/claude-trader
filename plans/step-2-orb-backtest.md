@@ -84,11 +84,24 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 - Volume matches bar for bar, except: the **9:30 bar** (Alpaca ~18% lower, since the opening auction is counted differently), and **Yahoo's newest bar while the market is open** (TSLA's 10:30 bar: ~25× too high)
 - The volume filter agrees 94% of the time. TSLA's "10:35 trigger at 7.98×" in our replays came from that bad newest bar: with correct volume it was 0.4× and wouldn't have triggered
 
-### 2.3 Signal engine
+### 2.3 Signal engine ✅
 - The live ORB rules applied to history, in-process (fast), using the same logic as the skill's scripts
 - **Consistency check:** the saved Oct 19 Yahoo data → the same 16 signals as the live pipeline replay
 
 **Done when:** the consistency check passes and one full historical day runs in under a second.
+
+**As built** ([app/backtest/signals.py](../app/backtest/signals.py)):
+- Calls the **skill's own functions**, so no rule is re-typed: `entry.evaluate` (the trigger), `exit.compute` (stop and target), `size.size_trade` (shares and refusals), then the 2.1 outcome engine
+- Mirrors the live scan's filters: the $5 price floor at the check, and skipping a stock with a missing 5-minute bar. Ties within the same bar go alphabetically, like the live bot
+- **Consistency check: on the saved Oct 19 data, the same 16 signals as the live pipeline**: same order, times, entries, stops, targets and shares (now a permanent test)
+- **All 512 days in 80 seconds**: 20,690 signals, 20,602 tradable (88 refused, mostly a share costing more than the $5k account allows)
+
+**First look (every signal taken, before 2.4's selection rules), not the final answer:**
+- Results: 2,772 target · 8,553 stop · 9,277 flat (3:55). **−0.082R a trade after costs**; −0.015R before costs (costs ≈ 0.067R a trade)
+- Tight stops do worst: stop under 0.5% of price → about −0.21R a trade; over 1% → −0.06R (supports the minimum stop distance idea)
+- Trigger time: no window is clearly positive (−0.07R to −0.13R)
+- 37% of trades reached +1R at some point, but only 13% reached +2R (relevant for 1R vs 2R)
+- Rough cap-5 first come first served: about −0.03R a trade (2.4 will do this properly, with the daily trade and loss limits)
 
 ### 2.4 Selection rules + costs
 - Cap N a day, first come first served (baseline)
