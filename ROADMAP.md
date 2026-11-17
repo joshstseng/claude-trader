@@ -23,7 +23,7 @@ no orders        paper orders         no orders        paper orders    paper ord
 |---|---|---|
 | 1a | Alerts + trade log | 🟨 In progress |
 | 1b | One-tap approval → paper orders | ⬜ Not started |
-| 2 | Backtest #1 (baseline) | ⬜ Not started |
+| 2 | Backtest #1 (baseline) | 🟨 In progress (framework) |
 | 3 | Claude filter + Backtest #2 | ⬜ Not started |
 | 4 | Hands-off on paper | ⬜ Not started |
 | 5 | Hands-off with real money | ⬜ Not started |
@@ -100,6 +100,8 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
   - **Minimum stop distance** *(noted 2026-11-17)*: HMC's stop was only $0.05 (0.15%) below the entry, which gave 110 shares. A stop that tight is likely to be hit by normal price wiggle and the bid-ask spread. Test a minimum stop distance (e.g. a % of price or a multiple of ATR)
 - **Discord `#backtests` channel:** one short summary per backtest run (settings, trade count, win rate, average R, expectancy, max drawdown, compared with the baseline), with a link to the full report. Create the channel when this step starts
 
+**Plan:** [plans/step-2-orb-backtest.md](plans/step-2-orb-backtest.md). Sub-steps 2.1–2.6: outcome engine → historical data → signal engine → selection rules + costs → runs + reports → `#backtests` channel.
+
 **Gate:** expected profit per trade is positive after costs, and the backtest roughly matches live paper results. If not, tune the setups or rules and backtest again (as many runs as needed).
 
 **Sub-steps:** *to be planned*
@@ -146,6 +148,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Backtests are repeatable and compared; the baseline has no Claude filter, and the filter is tested later |
 | 2026-11-17 | ~~Starts on the Mac; moves to a server by Step 4~~ → **Runs on Railway from Step 1a** (you didn't want to keep the Mac on). Trade log on a Railway volume |
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
+| 2026-11-17 | Backtest framework started in parallel with the Step 1a live gate (assumed cost 0.03%/side until Step 1b's real fills). Baseline: Nov 2024 → Nov 2026, live v1 settings, cap 5 first come first served; ranking tested later |
 | 2026-11-17 | Step 1a v1 settings: focus list = top ~150 most traded over $5 plus daily-scan hits; scan window 9:50–11:30 AM; trigger bar volume ≥ 1.0×; at most 5 alerts a day; stop at range midpoint, target 2R; $5k account / $50 max loss / $150 daily loss limit / 3 trades a day; shared Discord channels tagged `[ORB]` |
 
 ---
