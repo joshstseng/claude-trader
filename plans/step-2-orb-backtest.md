@@ -150,6 +150,27 @@ The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Decided
 
 ---
 
+## Results so far
+
+All 2024-11-01 → 2026-11-17, cash limit on, costs 0.03%/side. "Every signal" = all ~20,600 signals taken.
+
+| Run | Target | Trades | Win rate | Avg per trade | Before costs | Total | Worst drawdown | Every signal |
+|---|---|---|---|---|---|---|---|---|
+| #5 | 0.5R* | 736 | 66% | −0.029R | +0.028R | −$357 | −$987 | −0.077R |
+| #2 | **1R** | 694 | 52% | **−0.006R** | +0.051R | −$50 | −$1,084 | −0.081R |
+| #3 | 1.5R | 686 | 45% | −0.015R | +0.042R | −$165 | −$1,136 | −0.082R |
+| #1 | 2R (baseline) | 683 | 42% | −0.038R | +0.018R | −$650 | −$1,664 | −0.082R |
+| #4 | 3R | 683 | 41% | −0.023R | +0.033R | −$190 | −$1,383 | −0.079R |
+
+\* 0.5R also needed `risk.min_reward_risk=0.5` (the live risk rule requires at least 1.0).
+
+**Reading it:**
+- With ~690 trades, one run's average has a margin of error of about **±0.04R**. Every difference between targets is inside that, so **the target choice doesn't clearly matter**. 1R is best on paper (about break-even after costs), but that could be luck.
+- Across all ~20,600 signals (margin of error about ±0.007R), every target loses about **−0.08R after costs** and is about **−0.01R before costs**: the plain ORB signal has no edge.
+- The trades actually taken (the day's first signals, cap 5 + cash) do better than all signals (≈ +0.02 to +0.05R before costs vs ≈ −0.01R). That gap is about 2 margins of error: **worth testing whether the day's first breakouts are really better.**
+- **Costs decide the result:** ~0.06R a trade. Real fills (Step 1b) or cheaper entries (limit orders) matter as much as any rule change.
+- **Avoid overfitting:** trying many variations on the same 2 years will make one look good by luck. From now on, pick settings on **2024-11 → 2025-12** and confirm them on **2026** (held out).
+
 ## Variations queue (after the baseline)
 
 1. **Targets:** 1R, 1.5R, 2R, 3R
