@@ -119,9 +119,19 @@ class OrbDay:
         self.done: set[str] = set()       # signaled, expired or failed for good today
         self.signal_ids: dict[str, int] = {}
         self.workdir = runs_root / day / strategy.id
-        self.run_id = trade_log.start_run(
-            strategy.id, source, {"strategy": strategy.settings, "risk": rules},
-            label=f"ORB {source} {day}", date_from=day, date_to=day)
+        # a live day resumes after a restart: same run, same daily cap, same "already handled" list,
+        # so a redeploy mid-morning can't alert a stock twice or reset the cap. Replays start fresh.
+        existing = trade_log.find_day_run(strategy.id, source, day) if source == "live" else None
+        if existing:
+            self.run_id = existing["id"]
+            self.done = {r["symbol"] for r in trade_log.signals(run_id=self.run_id)}
+            self.resumed = True
+            log.info("[ORB] resuming today's run %s (%d signals so far)", self.run_id, len(self.done))
+        else:
+            self.run_id = trade_log.start_run(
+                strategy.id, source, {"strategy": strategy.settings, "risk": rules},
+                label=f"ORB {source} {day}", date_from=day, date_to=day)
+            self.resumed = False
 
     @property
     def paused(self) -> bool:
@@ -136,8 +146,12 @@ class OrbDay:
     def premarket(self, focus: list[str] | None = None) -> list[str]:
         """Build (or take) the focus list for the day."""
         if focus is None:
+            saved = self.workdir / "focus.json"
             if self.day_data:
                 focus = market.offline_symbols(self.day_data.bars)
+            elif saved.exists():                     # restarted today: reuse today's list
+                focus = json.loads(saved.read_text())["symbols"]
+                log.info("[ORB] reusing today's focus list (%d stocks)", len(focus))
             else:
                 doc = market.build_focus_list(self.s["focus_list"], self.workdir / "focus.json")
                 focus = doc["symbols"]

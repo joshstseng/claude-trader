@@ -140,6 +140,23 @@ class ReplayDayTest(unittest.TestCase):
             bot.premarket(["CDNS"])
             self.assertEqual(bot.tick("2026-10-19 09:51").alerted, ["CDNS"])
 
+    def test_live_day_resumes_after_a_restart(self):
+        """A redeploy mid-morning: same run, CDNS isn't alerted again, the cap carries over."""
+        def live_bot():
+            s = strategies.load("orb")
+            return OrbDay(s, settings.risk_rules(), self.log, source="live", day=DAY.isoformat(),
+                          alerter=self.alerter, runs_root=self.root / "runs", day_data=self.day_data)
+        first = live_bot()
+        first.premarket(["CDNS", "CVX"])
+        self.assertEqual(first.tick("2026-10-19 09:51").alerted, ["CDNS", "CVX"])
+        again = live_bot()                                   # the app restarted
+        self.assertTrue(again.resumed)
+        self.assertEqual(again.run_id, first.run_id)
+        again.premarket(["CDNS", "CVX"])
+        report = again.tick("2026-10-19 09:56")
+        self.assertEqual((report.signals, report.alerted), ([], []))
+        self.assertEqual(self.log.alerts_sent(strategy="orb", date="2026-10-19", run_id=again.run_id), 2)
+
     def test_late_start_logs_but_does_not_alert_stale_triggers(self):
         bot = self.bot()
         bot.premarket(["CDNS"])                                   # broke out at 9:50

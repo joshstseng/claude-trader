@@ -120,7 +120,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 **What:** the approval tap turns off, and the risk check is the only gate. Discord becomes a feed of what happened, plus `/pause`, `/flatten` and a kill switch.
 
-**Likely includes:** moving the app from the Mac to a cheap always-on server, plus alerts for when the app stops responding.
+**Likely includes:** alerts for when the app stops responding (it already runs on Railway since Step 1a).
 
 **Gate:** ~100+ hands-off trades with positive expected profit, matching the backtest, with no runaway bugs.
 
@@ -144,7 +144,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Notifications and approvals: **Discord** (separate channels) instead of Telegram |
 | 2026-11-17 | One-tap approval (1b) comes **before** the backtest; the backtest assumes every trade is approved |
 | 2026-11-17 | Backtests are repeatable and compared; the baseline has no Claude filter, and the filter is tested later |
-| 2026-11-17 | Starts on the Mac; moves to a server by Step 4 |
+| 2026-11-17 | ~~Starts on the Mac; moves to a server by Step 4~~ → **Runs on Railway from Step 1a** (you didn't want to keep the Mac on). Trade log on a Railway volume |
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
 | 2026-11-17 | Step 1a v1 settings: focus list = top ~150 most traded over $5 plus daily-scan hits; scan window 9:50–11:30 AM; trigger bar volume ≥ 1.0×; at most 5 alerts a day; stop at range midpoint, target 2R; $5k account / $50 max loss / $150 daily loss limit / 3 trades a day; shared Discord channels tagged `[ORB]` |
 

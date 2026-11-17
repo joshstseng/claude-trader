@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+data
+runs
+logs
+plans
+tests
+day-trader-skill/tests
+**/__pycache__

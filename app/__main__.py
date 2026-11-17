@@ -167,7 +167,7 @@ def cmd_replay(a) -> int:
         print(f"Posted {len(ids)} replay alerts to #setups. Buttons work while `python -m app run` is running.")
 
     rows = trade_log.signals(run_id=day_bot.run_id)
-    print(f"\nReplay of {day} (run {day_bot.run_id}, saved in {db.relative_to(paths.REPO_ROOT)}):")
+    print(f"\nReplay of {day} (run {day_bot.run_id}, saved in {db}):")
     print(f"  focus list {len(day_bot.focus)} stocks, {len(rows)} signals")
     for r in rows:
         al = trade_log.alert(r["id"])

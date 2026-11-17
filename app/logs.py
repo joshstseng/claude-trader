@@ -2,6 +2,7 @@
 
 import logging
 import logging.handlers
+import sys
 
 from app import paths
 
@@ -14,7 +15,7 @@ def setup(level: int = logging.INFO) -> None:
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S")
     file = logging.handlers.RotatingFileHandler(paths.LOGS_DIR / "app.log", maxBytes=5_000_000,
                                                 backupCount=5)
-    term = logging.StreamHandler()
+    term = logging.StreamHandler(sys.stdout)   # stdout: Railway shows stderr lines as errors
     for h in (file, term):
         h.setFormatter(fmt)
         h._claude_trader = True

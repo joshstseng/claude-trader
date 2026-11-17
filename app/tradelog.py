@@ -110,6 +110,12 @@ def _now() -> str:
 
 
 def code_version() -> str | None:
+    """The git commit the code came from. On Railway there's no .git folder, but Railway
+    passes the commit in RAILWAY_GIT_COMMIT_SHA."""
+    import os
+    sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+    if sha:
+        return sha[:7]
     try:
         sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=paths.REPO_ROOT,
                              capture_output=True, text=True, check=True).stdout.strip()
@@ -161,6 +167,12 @@ class TradeLog:
     def finish_run(self, run_id: int) -> None:
         self.db.execute("UPDATE runs SET finished_at = ? WHERE id = ?", (_now(), run_id))
         self.db.commit()
+
+    def find_day_run(self, strategy: str, source: str, day: str) -> sqlite3.Row | None:
+        """The latest run for one day (a live day resumes it after a restart)."""
+        return self.db.execute(
+            "SELECT * FROM runs WHERE strategy = ? AND source = ? AND date_from = ? AND date_to = ?"
+            " ORDER BY id DESC LIMIT 1", (strategy, source, day, day)).fetchone()
 
     def run(self, run_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

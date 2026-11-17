@@ -143,10 +143,14 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** each replay day ends with a summary.
 
-### 1a.8 Running it unattended
-- Starts automatically on your Mac (launchd); keeps the Mac awake during market hours (`caffeinate`); restarts after a crash
-- Log files, with old ones deleted automatically; a missed health ping shows in `#system`
-- A dry run on a replay day, then live market days
+### 1a.8 Running it unattended (on Railway)
+*Changed 2026-11-17: runs on Railway instead of the Mac, so the Mac can be off.* Setup guide: [setup-railway.md](setup-railway.md).
+- `Dockerfile` + `railway.json`: one long-running process, restarts after a crash, no public URL
+- Everything the app writes goes to a Railway volume at `/data` (`TRADER_STORAGE`), so it survives redeploys
+- A restart or redeploy mid-day **resumes** the day: same run, same daily cap, no stock alerted twice; today's focus list is reused
+- Only one copy can run at a time (lock file on the volume)
+- Logs in Railway's dashboard (plus `/data/logs/app.log`); errors ping you in `#system`
+- Risk to watch: Yahoo may rate-limit cloud servers. If it does, move market data to Alpaca earlier than Step 1b
 
 **Done when (Step 1a gate):** 5 market days in a row with no manual help.
 
