@@ -18,6 +18,7 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (started 2026-11-1
 | Data | Alpaca historical bars, full consolidated feed (SIP): 5-minute bars for the focus list, daily bars for the stock list. Free account confirmed: back to at least Jan 2024, ~0.5 s per 50 stocks per day |
 | Baseline settings | Today's live v1: focus 150 most traded + 50 daily-scan hits, scan 9:50–11:30, trigger bar volume ≥ 1.0×, stop at range midpoint, target 2R, flat at 3:55, $5k account / $50 max loss |
 | Which alerts get taken | **First come, first served (FCFS), cap 5 a day.** Ranking comes later as a variation |
+| Cash | **Cash limit ON**: open positions + a new one must fit the $5k account minus the 10% buffer (no margin); cash frees up when a position exits. Decided 2026-11-17 |
 | Assumed cost | **0.03% of the price per side** (spread + slippage); Alpaca charges no commission. Replaced by measured paper fills after Step 1b |
 | Views in every report | **(a) Every signal taken** (does the setup work at all?) and **(b) as the bot alerts** (cap 5, FCFS: what you'd actually get) |
 | Where it runs | Your Mac (one-off calculations). Bars cached in `data/bars/` (git-ignored). Not on Railway |
@@ -120,7 +121,7 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 | Cap 5 FCFS + risk rules, cash limit off | 1,536 (3 a day, every day) | −0.043R | −$2,304 | −$3,147 |
 | Cap 5 FCFS + risk rules, cash limit on | 683 (~1.3 a day) | −0.038R | −$650 | −$1,664 |
 
-The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Open decision: is the cash limit on or off in the baseline?** A real $5k account without margin can usually hold only one ~$3,500 position at a time; Alpaca's paper account has $100k+ and would allow all 3.
+The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Decided 2026-11-17: cash limit ON in the baseline** (a real $5k account without margin can usually hold only one ~$3,500 position at a time). Reports still show the cash-off view next to it. Step 1b enforces the same $5k cash rule on the paper account, so live paper results stay comparable.
 
 ### 2.5 Runs + reports
 - `python -m app backtest --from 2024-11-01 --to 2026-11-16 [--set exit.target=1R] [--label "…"]`

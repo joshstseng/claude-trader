@@ -245,6 +245,21 @@ def cmd_backtest_data(a) -> int:
     return 0
 
 
+def cmd_backtest(a) -> int:
+    from app.backtest import run as bt
+    logs.setup()
+    res = bt.run(date.fromisoformat(a.start), date.fromisoformat(a.end), label=a.label, overrides=a.set or [],
+                 progress=lambda m: logging.getLogger("app").info("[backtest] %s", m))
+    m = res.headline
+    print(f"\nRun #{res.run_id} ({res.label}): {m.get('trades', 0):,} trades, "
+          f"{m.get('avg_r', 0):+.3f}R a trade after costs, total ${m.get('total_usd', 0):+,.0f}")
+    if res.baseline:
+        bm = res.baseline[2]
+        print(f"  vs baseline run #{res.baseline[0]}: {m['avg_r'] - bm['avg_r']:+.3f}R a trade")
+    print(f"Report: {res.report_path}")
+    return 0
+
+
 def main(argv=None) -> int:
     settings.load_env()
     p = argparse.ArgumentParser(prog="python -m app")
@@ -267,8 +282,17 @@ def main(argv=None) -> int:
     bd = sub.add_parser("backtest-data", help="download (or reuse) historical bars for a backtest")
     bd.add_argument("--from", dest="start", required=True, help="YYYY-MM-DD")
     bd.add_argument("--to", dest="end", required=True, help="YYYY-MM-DD")
+    bt = sub.add_parser("backtest", help="run a backtest of the ORB bot and write its report")
+    bt.add_argument("--from", dest="start", required=True, help="YYYY-MM-DD")
+    bt.add_argument("--to", dest="end", required=True, help="YYYY-MM-DD")
+    bt.add_argument("--label", required=True, help='a name for the run, e.g. "baseline" or "1R target"')
+    bt.add_argument("--set", action="append", metavar="KEY=VALUE",
+                    help="change a setting for this run only, e.g. exit.target=1R, risk.max_trades_per_day=2, "
+                         "selection.cash_limit=false (repeatable)")
     sub.add_parser("check", help="Alpaca + Discord connection check")
     a = p.parse_args(argv)
+    if a.cmd == "backtest":
+        return cmd_backtest(a)
     if a.cmd == "backtest-data":
         return cmd_backtest_data(a)
     if a.cmd == "summary":

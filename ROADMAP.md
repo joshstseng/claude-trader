@@ -75,6 +75,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 - Market data switches from Yahoo (delayed) to Alpaca's live feed (free IEX)
   - *Found in Step 2.2:* Yahoo's **newest** 5-minute bar during the session can have badly wrong volume (TSLA 10:30 on Oct 19: ~25× too high), and the live bot reads exactly that bar for its volume check. But Alpaca's free real-time feed is IEX only (one exchange, a few % of volume), and its full feed (SIP) is 15 minutes delayed. Options: IEX volume ratios, waiting one extra minute for Yahoo to settle, or a paid SIP plan. Decide here
 - Records real fill prices, so we can measure how much worse fills are than the chart price
+- **Enforce the simulated $5k account's cash** (no margin): a new entry only if open positions + it fit $4,500. Alpaca's paper account has far more, but the backtest baseline uses this rule (decided 2026-11-17), so live paper must too
 
 **Gate:** a few weeks of paper trades without errors, with fills, stops, targets and flattens all handled correctly.
 
@@ -151,6 +152,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Backtests are repeatable and compared; the baseline has no Claude filter, and the filter is tested later |
 | 2026-11-17 | ~~Starts on the Mac; moves to a server by Step 4~~ → **Runs on Railway from Step 1a** (you didn't want to keep the Mac on). Trade log on a Railway volume |
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
+| 2026-11-17 | Backtest baseline and Step 1b both use a **cash limit**: the $5k account can't use margin, so usually one ~$3.5k position at a time |
 | 2026-11-17 | Backtest framework started in parallel with the Step 1a live gate (assumed cost 0.03%/side until Step 1b's real fills). Baseline: Nov 2024 → Nov 2026, live v1 settings, cap 5 first come first served; ranking tested later |
 | 2026-11-17 | Step 1a v1 settings: focus list = top ~150 most traded over $5 plus daily-scan hits; scan window 9:50–11:30 AM; trigger bar volume ≥ 1.0×; at most 5 alerts a day; stop at range midpoint, target 2R; $5k account / $50 max loss / $150 daily loss limit / 3 trades a day; shared Discord channels tagged `[ORB]` |
 

@@ -242,6 +242,51 @@ class TradeLog:
             "SELECT id FROM signals WHERE run_id = ? AND date = ? AND symbol = ?",
             (run_id, result.date, result.symbol)).fetchone()["id"]
 
+    def save_backtest(self, run_id: int, decisions: list) -> None:
+        """Bulk-save a backtest run: every signal (with its plan), whether it was alerted, whether it
+        was taken (as a 'took' response: the backtest approves every alert) and its outcome."""
+        run = self.run(run_id)
+        if run is None or run["source"] != "backtest":
+            raise ValueError(f"run {run_id} is not a backtest run")
+        now = _now()
+        cur = self.db.cursor()
+        for d in decisions:
+            s, o = d.signal, d.signal.outcome or {}
+            cur.execute(
+                "INSERT INTO signals (run_id, strategy, source, date, symbol, status, reason, trigger_time,"
+                " trigger_price, or_high, or_low, volume_x, entry, stop, target, target_r, risk_per_share, qty,"
+                " max_loss, risk_verdict, risk_reasons, created_at)"
+                " VALUES (?, ?, 'backtest', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_id, run["strategy"], s.day, s.symbol, s.status, s.reason or None, s.trigger_time,
+                 s.trigger_price, s.or_high, s.or_low, s.volume_x, s.entry, s.stop, s.target, s.target_r,
+                 s.risk_per_share, s.qty, s.max_loss,
+                 ("PASS" if d.taken else "BLOCK") if d.alerted else None,
+                 json.dumps([] if d.taken else [d.why]), now))
+            sid = cur.lastrowid
+            cur.execute("INSERT INTO alerts (signal_id, sent, held_reason, at) VALUES (?, ?, ?, ?)",
+                        (sid, int(d.alerted), None if d.alerted else d.why, now))
+            if d.taken:
+                cur.execute("INSERT INTO responses (signal_id, action, user_id, at) VALUES (?, 'took', 'backtest', ?)",
+                            (sid, now))
+            if o.get("result"):
+                cur.execute(
+                    "INSERT INTO outcomes (signal_id, result, exit_price, exit_time, r_multiple, pnl_usd, method,"
+                    " resolved_at, r_gross, cost_usd, mfe_r, mae_r, bars_held)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (sid, o["result"], o.get("exit_price"), o.get("exit_time"), o.get("r_net"), o.get("pnl_usd"),
+                     o.get("method", ""), now, o.get("r_gross"), o.get("cost_usd"), o.get("mfe_r"),
+                     o.get("mae_r"), o.get("bars_held")))
+        self.db.commit()
+
+    def runs(self, *, strategy: str | None = None, source: str | None = None) -> list[sqlite3.Row]:
+        where, args = [], []
+        for col, val in (("strategy", strategy), ("source", source)):
+            if val is not None:
+                where.append(f"{col} = ?")
+                args.append(val)
+        sql = "SELECT * FROM runs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id"
+        return self.db.execute(sql, args).fetchall()
+
     def signal(self, signal_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM signals WHERE id = ?", (signal_id,)).fetchone()
 
