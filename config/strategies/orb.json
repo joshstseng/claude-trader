@@ -4,10 +4,18 @@
   "enabled": true,
   "interval": "5m",
   "opening_range_minutes": 15,
+  "schedule": {
+    "premarket_at": "08:30",
+    "after_close_at": "16:15",
+    "check_every_minutes": 5,
+    "check_delay_minutes": 1
+  },
   "focus_list": {
     "top_n_by_dollar_volume": 150,
     "min_price": 5,
-    "include_daily_scan_hits": true
+    "include_daily_scan_hits": true,
+    "max_daily_scan_hits": 50,
+    "min_daily_volume": 1000000
   },
   "scan_window": {
     "start": "09:50",
@@ -20,7 +28,8 @@
   },
   "alerts": {
     "max_per_day": 5,
-    "require_risk_pass": true
+    "require_risk_pass": true,
+    "stale_after_minutes": 10
   },
   "timemachine": {
     "enabled": true

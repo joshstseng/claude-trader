@@ -1,6 +1,6 @@
 """Takes one signal through the day-trader-skill scripts:
 
-    entry -> exit -> time machine -> budget -> risk -> news
+    entry -> exit -> budget -> risk -> (time machine -> news, only when the signal will be alerted)
 
 Each signal runs in its own folder, runs/<date>/<strategy>/<TICKER>/, because the
 scripts keep one trade at a time in fixed files (trader/entry.json, trader/plan.json).
@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from app import paths
@@ -42,9 +42,10 @@ SCRIPTS = {
 @dataclass
 class Offline:
     """Saved data for replays. Each path is passed to that script's --offline flag."""
-    entry: Path | None = None        # Yahoo chart JSON for the day (5m bars)
+    entry: Path | None = None        # Yahoo chart JSON for the day (5m bars), or a folder of <TICKER>.json
     timemachine: Path | None = None  # Yahoo chart JSON, ~60 days of 5m bars
     news: Path | None = None         # folder of saved headlines / filings
+    allow_network: bool = True       # False: a step without saved data is skipped, never fetched
 
 
 @dataclass
@@ -139,9 +140,14 @@ def run_signal(
     runs_root: Path = paths.RUNS_DIR,
     sec_user_agent: str | None = None,
     with_news: bool = True,
+    want_extras: Callable[[SignalResult], bool] | None = None,
 ) -> SignalResult:
     """Run one symbol through the whole pipeline. Never raises for a step failure:
-    the result's status and reason say what happened."""
+    the result's status and reason say what happened.
+
+    The time machine and news are the slow steps and are information for the alert only, so they
+    run last, after the risk check. `want_extras(result)` can skip them for a signal that won't be
+    alerted (e.g. stale or over the daily cap)."""
     if strategy.id != "orb":
         raise ValueError(f"run_signal only knows the ORB bot so far, not {strategy.id!r}")
     s = strategy.settings
@@ -188,14 +194,7 @@ def run_signal(
         result.reason = f"exit plan: {x.error or (x.data or {}).get('error', 'refused')}"
         return result
 
-    # 3. time machine: odds (information only; a failure here doesn't stop the signal)
-    if s.get("timemachine", {}).get("enabled", True):
-        args = ["run", "--json", "--write", *clock]
-        if off.timemachine:
-            args += ["--offline", str(off.timemachine)]
-        step("timemachine", args)
-
-    # 4. budget: how many shares
+    # 3. budget: how many shares
     b = step("budget", ["--json", "--write", *clock])
     refusal = (b.data or {}).get("sizing", {}).get("refusal") if b.data else None
     if not b.ok or refusal or not (b.data or {}).get("orders"):
@@ -203,7 +202,7 @@ def run_signal(
         result.reason = f"budget: {refusal or b.error or 'no order'}"
         return result
 
-    # 5. risk: PASS / BLOCK against the rules, counting today's shared state
+    # 4. risk: PASS / BLOCK against the rules, counting today's shared state
     r = step("risk", ["--json", "--state", str(day_state / "broker.json"), "--today", date, *clock])
     verdict = (result.risk or {}).get("verdict")
     if verdict == "PASS":
@@ -214,8 +213,18 @@ def run_signal(
     else:
         result.reason = f"risk: {r.error or 'no verdict'}"
 
+    if want_extras is not None and not want_extras(result):
+        return result
+
+    # 5. time machine: odds (information only; a failure here doesn't stop the signal)
+    if s.get("timemachine", {}).get("enabled", True) and (off.timemachine or off.allow_network):
+        args = ["run", "--json", "--write", *clock]
+        if off.timemachine:
+            args += ["--offline", str(off.timemachine)]
+        step("timemachine", args)
+
     # 6. news: headlines and filings for the alert (information only)
-    if with_news:
+    if with_news and (off.news or off.allow_network):
         args = ["--tickers", symbol, "--hours", "24", "--dry-run", "--json"]
         if now:
             args += ["--now", datetime.strptime(now, "%Y-%m-%d %H:%M").replace(tzinfo=NY).isoformat()]

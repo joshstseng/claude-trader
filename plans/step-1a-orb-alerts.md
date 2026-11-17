@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅ 1a.5 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -95,7 +95,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** replay signals are saved and can be looked up.
 
-### 1a.5 Scheduler + daily routine
+### 1a.5 Scheduler + daily routine ✅
 - Market calendar from Alpaca (holidays, 1:00 PM early closes)
 - Pre-market: refresh the stock list weekly, run the daily scan, build the focus list
 - Scan window: check the focus list every 5 minutes, ~1 minute after each bar closes
@@ -103,6 +103,14 @@ All of these live in settings files, not in code, so the backtest can vary them.
 - A simulated clock, so a full past day can be replayed
 
 **Done when:** a full past day replays end to end on the simulated clock.
+
+**As built:**
+- Each check runs the repo's fast ORB scan on the focus list first, then the full pipeline only on stocks above their range. A stock held back only by the volume check is checked again next time.
+- Order inside the pipeline: entry → exit → budget → risk → *alert decision* → Time Machine + news (only for signals that will be alerted, since those two are slow). Held-back signals are still logged with their full plan.
+- Alerts are held back (and logged with the reason) when: the risk check doesn't PASS, the trigger is **stale** (more than 10 minutes old, e.g. after a late start), the bot is **paused**, or the **daily cap** (5) is reached.
+- Focus list = top 150 by dollars traded over $5 + up to **50** daily-scan hits (most traded first). Built in ~2.5 min.
+- Commands: `python -m app run` (live), `python -m app replay --date … --offline …` (saved data) or `--symbols …` (recent days from Yahoo). Replays go to `data/replays.db`, never the live log.
+- Oct 19 full-day replay (234 stocks, saved data): 16 signals in ~16 s; 5 alerted by 9:55, the rest held by the daily cap.
 
 ### 1a.6 Discord bot (built into the app)
 - **Alert in `#setups`:**
