@@ -39,7 +39,32 @@ def show() -> int:
     return 0
 
 
-async def live(dcfg, calendar, make_day, state) -> None:
+async def results_and_summary(post, trade_log, day: str, session, rules: dict, orb, *,
+                              run_id=None, only_if_new: bool = False, tries: int = 3,
+                              scanned: bool = True) -> None:
+    """After the close: work out every signal's result, then post the summary.
+    Retries (10 minutes apart) if Alpaca's bars can't be fetched."""
+    from app import afterclose, marketdata
+    cost = orb.settings.get("costs", {}).get("pct_per_side", 0.0)
+    for attempt in range(1, tries + 1):
+        try:
+            n = await asyncio.to_thread(afterclose.resolve_day, trade_log, day, fetch=marketdata.bars_5m,
+                                        flat_by=afterclose.flat_by_for(session, rules), cost_pct=cost,
+                                        run_id=run_id)
+            break
+        except Exception:  # noqa: BLE001
+            if attempt == tries:
+                logging.getLogger("app").exception("[ORB] couldn't work out %s's results", day)
+                return
+            logging.getLogger("app").warning("[ORB] results for %s failed (try %d), retrying in 10 min",
+                                             day, attempt)
+            await asyncio.sleep(600)
+    if only_if_new and n == 0:
+        return          # catch-up after a restart: nothing new, the summary was already posted
+    await post(afterclose.summary_text(trade_log, day, run_id=run_id, cost_pct=cost, scanned=scanned))
+
+
+async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     """The Discord bot and the scheduler, side by side in one loop."""
     from app.discord_bot import DiscordAlerter, DiscordErrorHandler, TraderBot
 
@@ -64,8 +89,17 @@ async def live(dcfg, calendar, make_day, state) -> None:
 
         await bot.post_system("🟢 **ORB bot online** · paper · alerts only, no orders (Step 1a)"
                               + (" · ⏸️ still **paused** (`/resume` to turn alerts on)" if state.paused else ""))
+        async def after_close(day_bot: OrbDay) -> None:
+            await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
+                                      run_id=day_bot.run_id,
+                                      scanned=day_bot.checks > 0 or day_bot.resumed)
+
+        async def catch_up(day: str, session) -> None:
+            await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)
+
         sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
-                                                notify=bot.post_system))
+                                                notify=bot.post_system, after_close=after_close,
+                                                catch_up=catch_up))
         try:
             done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)
             for t in done:
@@ -116,7 +150,7 @@ def cmd_run(a) -> int:
                       sec_user_agent=settings.sec_user_agent())
 
     try:
-        asyncio.run(live(dcfg, calendar, make_day, state))
+        asyncio.run(live(dcfg, calendar, make_day, state, trade_log, rules, orb))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     logging.getLogger("app").info("Stopped")
@@ -177,6 +211,29 @@ def cmd_replay(a) -> int:
     return 0
 
 
+def cmd_summary(a) -> int:
+    """Work out a day's results and print (or post) the summary."""
+    from app import afterclose, marketdata
+    logs.setup()
+    rules = settings.risk_rules()
+    orb = strategies.load("orb")
+    db = Path(a.db) if a.db else (paths.DATA_DIR / ("tradelog.db" if a.source == "live" else "replays.db"))
+    trade_log = tradelog.TradeLog(db)
+    day = date.fromisoformat(a.date)
+    cost = orb.settings.get("costs", {}).get("pct_per_side", 0.0)
+    n = afterclose.resolve_day(trade_log, a.date, fetch=marketdata.bars_5m,
+                               flat_by=afterclose.flat_by_for(market.SkillCalendar().session(day), rules),
+                               cost_pct=cost, source=a.source, run_id=a.run)
+    text = afterclose.summary_text(trade_log, a.date, source=a.source, run_id=a.run, cost_pct=cost)
+    print(f"(worked out {n} new results)\n\n{text}")
+    if a.post:
+        from app.discord_bot import post_once
+        dcfg = settings.discord_settings()
+        asyncio.run(post_once(dcfg, dcfg.channel_daily_summary, [(text, None, None)]))
+        print("\nPosted to #daily-summary.")
+    return 0
+
+
 def main(argv=None) -> int:
     settings.load_env()
     p = argparse.ArgumentParser(prog="python -m app")
@@ -190,8 +247,16 @@ def main(argv=None) -> int:
     r.add_argument("--symbols", help="comma-separated focus list (default: every ticker in --offline)")
     r.add_argument("--db", help="trade log file (default data/replays.db)")
     r.add_argument("--discord", action="store_true", help="also post the alerts to #setups (marked REPLAY)")
+    sm = sub.add_parser("summary", help="work out a day's results and print the summary")
+    sm.add_argument("--date", required=True, help="YYYY-MM-DD")
+    sm.add_argument("--source", default="live", choices=["live", "replay"])
+    sm.add_argument("--run", type=int, help="only this run (e.g. one replay)")
+    sm.add_argument("--db", help="trade log file (default: the live or replay log)")
+    sm.add_argument("--post", action="store_true", help="also post it to #daily-summary")
     sub.add_parser("check", help="Alpaca + Discord connection check")
     a = p.parse_args(argv)
+    if a.cmd == "summary":
+        return cmd_summary(a)
     if a.cmd == "run":
         return cmd_run(a)
     if a.cmd == "replay":

@@ -116,6 +116,7 @@ class OrbDay:
         self._paused = False
         self.pause_source: Callable[[], bool] | None = None   # e.g. the app's /pause setting
         self.focus: list[str] = []
+        self.checks = 0                   # checks run by this process today
         self.done: set[str] = set()       # signaled, expired or failed for good today
         self.signal_ids: dict[str, int] = {}
         self.workdir = runs_root / day / strategy.id
@@ -187,6 +188,7 @@ class OrbDay:
 
     def tick(self, now: str | None = None) -> TickReport:
         """One check. `now` = "YYYY-MM-DD HH:MM" New York for replays, None for live."""
+        self.checks += 1
         report = TickReport(at=now or datetime.now(market.NY).strftime("%Y-%m-%d %H:%M"))
         todo = [s for s in self.focus if s not in self.done]
         if not todo:

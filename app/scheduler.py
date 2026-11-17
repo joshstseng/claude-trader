@@ -106,8 +106,11 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
 
 
 async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealClock, *,
-                      state: AppState | None = None, notify: Notify | None = None, after_close=None):
-    """Live: run every market day, sleep through nights, weekends and holidays."""
+                      state: AppState | None = None, notify: Notify | None = None, after_close=None,
+                      catch_up: Callable[[str, market.Session], Awaitable[None]] | None = None):
+    """Live: run every market day, sleep through nights, weekends and holidays.
+    `catch_up` runs when the app starts after today's close (e.g. it was down at 4:15 PM), so the
+    day's results still get worked out."""
     while True:
         now = clock.now()
         session = await asyncio.to_thread(calendar.session, now.date())
@@ -117,6 +120,11 @@ async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealCl
             day_bot = make_day(now.date().isoformat())
             await run_day(day_bot, session, clock, simulated=False, state=state, notify=notify,
                           after_close=after_close)
+        elif session and catch_up:
+            try:
+                await catch_up(now.date().isoformat(), session)
+            except Exception:  # noqa: BLE001
+                log.exception("[ORB] after-close catch-up failed")
         elif session is None and now.weekday() < 5:
             await _say(notify, f"🏖️ Market closed today ({now:%a %b %-d}). See you next market day.")
         tomorrow = datetime.combine(now.date() + timedelta(days=1), dtime(7, 0), tzinfo=NY)

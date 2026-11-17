@@ -33,5 +33,9 @@
   },
   "timemachine": {
     "enabled": true
+  },
+  "costs": {
+    "pct_per_side": 0.0003,
+    "note": "assumed spread + slippage until Step 1b measures real paper fills"
   }
 }

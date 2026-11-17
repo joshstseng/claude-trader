@@ -256,6 +256,10 @@ class TraderBot(discord.Client):
         prefix = f"<@{self.cfg.owner_id}> " if ping else ""
         await self.channel(self.cfg.channel_system).send(prefix + text[:1900])
 
+    async def post_daily(self, text: str) -> None:
+        await self.ready.wait()
+        await self.channel(self.cfg.channel_daily_summary).send(text)
+
     async def post_alert(self, signal_id: int, source: str, r: SignalResult) -> tuple[int, int]:
         await self.ready.wait()
         preview, embed = alert_message(signal_id, source, r)

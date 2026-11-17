@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅ 1a.5 ✅ 1a.6 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅ 1a.5 ✅ 1a.6 ✅ 1a.7 ✅ 1a.8 ✅ · waiting on the 5-day gate)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -134,7 +134,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 - The daily alert cap counts per run (one live day = one run).
 - Tested on the phone 2026-11-17: 3 replay alerts, 9 taps saved (including changed minds), across an app restart.
 
-### 1a.7 After the close
+### 1a.7 After the close ✅
 - For **every** signal (alerted or not), work out what it would have done from the 5-minute bars:
   - Target first, stop first, or neither by 3:55 PM
   - If the stop and target both fall inside the same bar, count it as a stop (conservative)
@@ -143,7 +143,15 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** each replay day ends with a summary.
 
-### 1a.8 Running it unattended (on Railway)
+**As built** ([app/afterclose.py](../app/afterclose.py), using the Step 2.1 outcome engine):
+- 4:15 PM ET (15 min after an early close): Alpaca 5-minute bars → every signal's result (alerted or held back) → trade log → `#daily-summary`
+- Summary: alerted / all signals / your picks, each with ✅ target · ❌ stop · ➖ flat, total and average R, and $ after costs (0.03% per side, `costs` in `config/strategies/orb.json`)
+- If Alpaca fails it retries twice, 10 minutes apart. If the app was down at 4:15 PM, it catches up when it starts
+- Quiet days say why: "no signals" vs "no checks ran (started after the scan window)"
+- `python -m app summary --date YYYY-MM-DD [--source replay --run N] [--post]` reruns any day by hand
+- First real numbers (Oct 19 replay, Alpaca bars): alerted 5 → 4 stops, 1 flat, **−4.53R (−$153)**; all 16 → −0.42R per trade. HMC's $0.05 stop lost 1.4R because costs alone were ~0.4R (see the minimum stop distance item in Step 2)
+
+### 1a.8 Running it unattended (on Railway) ✅
 *Changed 2026-11-17: runs on Railway instead of the Mac, so the Mac can be off.* Setup guide: [setup-railway.md](setup-railway.md).
 - `Dockerfile` + `railway.json`: one long-running process, restarts after a crash, no public URL
 - Everything the app writes goes to a Railway volume at `/data` (`TRADER_STORAGE`), so it survives redeploys
