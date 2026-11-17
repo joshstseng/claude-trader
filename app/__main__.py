@@ -84,6 +84,9 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
 
     bot = TraderBot(dcfg, state)
     logging.getLogger().addHandler(DiscordErrorHandler(bot))
+    from app.broker import AlpacaPaper
+    from app.orders import OrderDesk
+    bot.desk = OrderDesk(tradelog.TradeLog(), AlpacaPaper(), orb.settings, rules)   # Approve -> paper order
     loop = asyncio.get_running_loop()
     me = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):

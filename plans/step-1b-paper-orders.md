@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅ 1b.4 ✅)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -64,7 +64,7 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 
 **As built** ([app/account.py](../app/account.py)): a day account in `runs/<date>/state/` keeps `account.json` (positions, entries, exits, P&L) and writes the two files the skill's `check.py` reads: `broker.json` (entries placed today, with their max losses) and `portfolio.json` (cash = $5,000 minus open positions' cost, matching the backtest's cash rule). Every signal's risk check now uses them. An entry that never fills is un-counted; a closed position frees its cash; the record survives restarts; each day starts fresh at $5,000. Nothing writes to it yet: 1b.4 (orders) and 1b.5 (fills) will.
 
-### 1b.4 Approve → order
+### 1b.4 Approve → order ✅
 - Alert buttons become **[Approve] [Skip]**; only you can press them. **"Took it" is removed** (decided 2026-11-17): Approve replaces it
 - On Approve:
   1. **Stale check:** the alert is under N minutes old (proposed 5) and the price hasn't moved more than a set amount past the entry (proposed 0.25R) or below the stop. If it fails, it's refused, with the reason shown on the alert
@@ -73,6 +73,10 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 - The alert updates live: *submitted → filled at $X (slippage $Y) / not filled, cancelled*
 
 **Done when:** an approval in a paper session places exactly one order, and a stale or blocked approval places none.
+
+**As built** ([app/orders.py](../app/orders.py), [app/broker.py](../app/broker.py)): Approve → stale check (≤ 5 min, price ≤ entry + 0.25R and above the stop, latest IEX trade) → re-sized at the limit (entry + the lesser of 0.1R and 0.1%) with the skill's `size_trade` → the skill's `check.py` again on today's account → one bracket order (`orb-<date>-<signal>` client id) → counted in the account, saved in a new `orders` table, and recorded as "took". After 2 minutes, an unfilled entry is cancelled and un-counted; a fill is reported with its slippage. The alert shows each step as a line; the buttons lock once an order is placed. Replays and `orders.enabled: false` only record. Old alerts keep their "Took it".
+- Tested with a fake broker (10 cases) and **on the real paper account**: a bracket was accepted with its stop and target legs, a repeated client id was refused by Alpaca, and the order cancelled cleanly
+- **Shipped with `orders.enabled: false`** until 1b.6 (3:55 PM flatten) exists, so an approved trade can't be left open overnight
 
 ### 1b.5 Tracking fills and exits
 - Alpaca's live trade updates (stream): entry fills, partial fills, stop hits, target hits

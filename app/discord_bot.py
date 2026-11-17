@@ -140,7 +140,8 @@ def alert_message(signal_id: int, source: str, r: SignalResult) -> tuple[str, di
 
     em = discord.Embed(title=f"{tag}{r.symbol} · ORB breakout", description="\n".join(lines)[:4000],
                        color=GREY if replay else GREEN)
-    em.set_footer(text=f"Alert only, no order placed · paper · #{signal_id}")
+    em.set_footer(text=f"Approve = bracket order on the paper account (entry, stop, target) · #{signal_id}"
+                     if not replay else f"Replay: Approve only records · #{signal_id}")
     return preview, em
 
 
@@ -149,31 +150,35 @@ def with_response(embed: discord.Embed, action: str, when: datetime) -> discord.
     from app.market import NY
     em = embed.copy()
     desc = (em.description or "").split("\n\n**Your call:**")[0]
-    label = "✅ Took it" if action == "took" else "⏭️ Skipped"
+    label = {"took": "✅ Took it", "approve": "✅ Approved"}.get(action, "⏭️ Skipped")
     em.description = f"{desc}\n\n**Your call:** {label} · {when.astimezone(NY).strftime(NY_FMT)} ET"
     return em
 
 
 # --------------------------------------------------------------------- buttons
 
-BUTTON_RE = r"orb:(?P<action>took|skip):(?P<source>live|replay):(?P<sid>[0-9]+)"
+BUTTON_RE = r"orb:(?P<action>approve|took|skip):(?P<source>live|replay):(?P<sid>[0-9]+)"
+LABELS = {"approve": ("Approve", "✓ Approved"), "took": ("Took it", "✓ Took it"), "skip": ("Skip", "✓ Skipped")}
 
 
 class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_RE):
-    def __init__(self, action: str, source: str, signal_id: int, chosen: str | None = None):
-        """`chosen` = your last tap: that button is highlighted with a ✓, the other is greyed."""
+    """[Approve] places a paper bracket order (Step 1b.4); [Skip] records that you passed.
+    ("took" only exists on alerts posted before Step 1b: it just records.)"""
+
+    def __init__(self, action: str, source: str, signal_id: int, chosen: str | None = None,
+                 locked: bool = False):
+        """`chosen` = your last tap (highlighted with a ✓). `locked` = no more taps (an order was
+        placed, or the approval was refused for good)."""
         self.action, self.source, self.signal_id = action, source, signal_id
-        took = action == "took"
-        if chosen is None:
-            label = "Took it" if took else "Skip"
-            style = discord.ButtonStyle.success if took else discord.ButtonStyle.secondary
-        elif chosen == action:
-            label = "✓ Took it" if took else "✓ Skipped"
-            style = discord.ButtonStyle.success if took else discord.ButtonStyle.primary
+        plain, done = LABELS[action]
+        go = action in ("approve", "took")
+        if chosen == action:
+            label, style = done, (discord.ButtonStyle.success if go else discord.ButtonStyle.primary)
+        elif chosen is None and not locked:
+            label, style = plain, (discord.ButtonStyle.success if go else discord.ButtonStyle.secondary)
         else:
-            label = "Took it" if took else "Skip"
-            style = discord.ButtonStyle.secondary
-        super().__init__(discord.ui.Button(label=label, style=style,
+            label, style = plain, discord.ButtonStyle.secondary
+        super().__init__(discord.ui.Button(label=label, style=style, disabled=locked,
                                            custom_id=f"orb:{action}:{source}:{signal_id}"))
 
     @classmethod
@@ -190,21 +195,56 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
         if trade_log.signal(self.signal_id) is None:
             await interaction.response.send_message("I can't find that signal in the log.", ephemeral=True)
             return
-        trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
         embed = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
-        view = decision_view(self.source, self.signal_id, chosen=self.action)
-        if embed:
+        now = datetime.now().astimezone()
+        if self.action != "approve":                     # Skip (or an old "Took it"): just record it
+            trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
+            view = decision_view(self.source, self.signal_id, chosen=self.action, kind=self._kind(interaction))
             await interaction.response.edit_message(
-                embed=with_response(embed, self.action, datetime.now().astimezone()), view=view)
+                embed=with_response(embed, self.action, now) if embed else discord.utils.MISSING, view=view)
+            return
+
+        await interaction.response.defer()               # placing an order can take a few seconds
+        if bot.desk is None:
+            trade_log.record_response(self.signal_id, "took", user_id=interaction.user.id)
+            from app.orders import Outcome
+            out = Outcome(False, "📝 Recorded. Ordering isn't set up in this app, so nothing was placed.")
         else:
-            await interaction.response.edit_message(view=view)
+            out = await asyncio.to_thread(bot.desk.approve, self.signal_id, interaction.user.id,
+                                          source=self.source)
+        if embed:
+            embed = with_order_line(with_response(embed, "approve", now), out.text)
+        locked = out.placed or out.final
+        await interaction.edit_original_response(
+            embed=embed or discord.utils.MISSING,
+            view=decision_view(self.source, self.signal_id, chosen="approve" if out.placed else None,
+                               locked=locked))
+        if out.placed and out.client_id:
+            bot.follow_entry(interaction.message, out.client_id)
+
+    @staticmethod
+    def _kind(interaction: discord.Interaction) -> str:
+        """Keep an old alert's buttons ("Took it") as they were."""
+        ids = [c.custom_id for row in (interaction.message.components if interaction.message else [])
+               for c in getattr(row, "children", [])]
+        return "took" if any(":took:" in (i or "") for i in ids) else "approve"
 
 
-def decision_view(source: str, signal_id: int, chosen: str | None = None) -> discord.ui.View:
+def decision_view(source: str, signal_id: int, chosen: str | None = None, locked: bool = False,
+                  kind: str = "approve") -> discord.ui.View:
     view = discord.ui.View(timeout=None)
-    view.add_item(DecisionButton("took", source, signal_id, chosen))
-    view.add_item(DecisionButton("skip", source, signal_id, chosen))
+    view.add_item(DecisionButton(kind, source, signal_id, chosen, locked))
+    view.add_item(DecisionButton("skip", source, signal_id, chosen, locked))
     return view
+
+
+def with_order_line(embed: discord.Embed, text: str) -> discord.Embed:
+    """Add an order status line under the alert (each update adds a line, so you see the story)."""
+    em = embed.copy()
+    desc = em.description or ""
+    em.description = (desc + ("\n" if "**Order" in desc or "Not placed" in desc or "Recorded" in desc else "\n\n")
+                      + text)[:4000]
+    return em
 
 
 async def owner_only(interaction: discord.Interaction) -> bool:
@@ -225,6 +265,7 @@ class TraderBot(discord.Client):
         self._logs: dict[str, tradelog.TradeLog] = {}
         self.ready = asyncio.Event()
         self._last_error_post = 0.0
+        self.desk = None            # app.orders.OrderDesk (live app only): Approve -> paper order
         self._add_commands()
 
     def trade_log(self, source: str) -> tradelog.TradeLog:
@@ -266,6 +307,19 @@ class TraderBot(discord.Client):
         ch = self.channel(self.cfg.channel_setups)
         msg = await ch.send(preview, embed=embed, view=decision_view(source, signal_id))
         return ch.id, msg.id
+
+    def follow_entry(self, message: discord.Message, client_id: str) -> None:
+        """After the fill timeout: filled → say so; not filled → cancelled. Updates the alert."""
+        async def follow():
+            await asyncio.sleep(int((self.desk.o or {}).get("fill_timeout_seconds", 120)))
+            try:
+                out = await asyncio.to_thread(self.desk.check_entry, client_id)
+                fresh = await message.channel.fetch_message(message.id)
+                if fresh.embeds:
+                    await fresh.edit(embed=with_order_line(fresh.embeds[0], out.text))
+            except Exception:  # noqa: BLE001
+                log.exception("[ORB] follow-up for %s failed", client_id)
+        asyncio.create_task(follow())
 
     def post_error_threadsafe(self, text: str) -> None:
         """From any thread; at most one error post a minute so a bad day can't spam you."""

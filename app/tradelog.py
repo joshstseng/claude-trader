@@ -93,6 +93,28 @@ CREATE TABLE IF NOT EXISTS responses (
     at         TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS orders (
+    id               INTEGER PRIMARY KEY,
+    signal_id        INTEGER NOT NULL REFERENCES signals(id),
+    client_order_id  TEXT NOT NULL UNIQUE,  -- orb-<date>-<signal id>: a retry can never double-order
+    broker_order_id  TEXT,
+    symbol           TEXT NOT NULL,
+    qty              INTEGER NOT NULL,
+    limit_price      REAL,
+    stop             REAL,
+    target           REAL,
+    status           TEXT NOT NULL,         -- submitted / filled / partially_filled / cancelled / rejected / closed
+    submitted_at     TEXT NOT NULL,
+    filled_qty       INTEGER,
+    filled_price     REAL,
+    filled_at        TEXT,
+    exit_reason      TEXT,                  -- stop / target / flat (1b.5)
+    exit_price       REAL,
+    exited_at        TEXT,
+    pnl_usd          REAL,
+    note             TEXT
+);
+
 CREATE TABLE IF NOT EXISTS outcomes (
     signal_id    INTEGER PRIMARY KEY REFERENCES signals(id),
     result       TEXT NOT NULL CHECK (result IN ('target', 'stop', 'flat', 'no_data')),
@@ -382,6 +404,38 @@ class TradeLog:
             (signal_id, o.result, o.exit_price, o.exit_time, o.r_net, o.pnl_usd, o.method, _now(),
              o.r_gross, o.cost_usd, o.mfe_r, o.mae_r, o.bars_held))
         self.db.commit()
+
+    # ---------------------------------------------------------------- orders (1b)
+
+    def add_order(self, signal_id: int, client_order_id: str, symbol: str, qty: int, limit_price: float,
+                  stop: float, target: float, *, broker_order_id: str | None = None,
+                  status: str = "submitted") -> int:
+        cur = self.db.execute(
+            "INSERT INTO orders (signal_id, client_order_id, broker_order_id, symbol, qty, limit_price, stop,"
+            " target, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (signal_id, client_order_id, broker_order_id, symbol, qty, limit_price, stop, target, status, _now()))
+        self.db.commit()
+        return cur.lastrowid
+
+    def update_order(self, client_order_id: str, **fields) -> None:
+        allowed = {"broker_order_id", "status", "filled_qty", "filled_price", "filled_at", "exit_reason",
+                   "exit_price", "exited_at", "pnl_usd", "note"}
+        bad = set(fields) - allowed
+        if bad:
+            raise ValueError(f"unknown order fields {bad}")
+        if fields:
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            self.db.execute(f"UPDATE orders SET {sets} WHERE client_order_id = ?",
+                            (*fields.values(), client_order_id))
+            self.db.commit()
+
+    def order_for_signal(self, signal_id: int) -> sqlite3.Row | None:
+        return self.db.execute("SELECT * FROM orders WHERE signal_id = ? ORDER BY id DESC LIMIT 1",
+                               (signal_id,)).fetchone()
+
+    def alert_at(self, signal_id: int) -> str | None:
+        a = self.alert(signal_id)
+        return a["at"] if a else None
 
     def outcome(self, signal_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM outcomes WHERE signal_id = ?", (signal_id,)).fetchone()

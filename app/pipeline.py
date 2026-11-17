@@ -101,6 +101,18 @@ class SignalResult:
         return (r.get("results") or [None])[0] if r else None
 
 
+def risk_check(folder: Path, acct, day: str, now: str | None = None) -> tuple[str | None, list[str]]:
+    """Run the skill's check.py on the signal folder's orders.json against today's account.
+    Returns (PASS / BLOCK / None, reasons)."""
+    args = ["--json", "--state", str(acct.broker_file), "--portfolio", str(acct.portfolio_file),
+            "--today", day, "--no-write"] + (["--now", now] if now else [])
+    r = _run("risk", args, folder)
+    res = ((r.data or {}).get("results") or [None])[0] or {}
+    if not res:
+        return None, [r.error or "the risk check gave no verdict"]
+    return res.get("verdict"), res.get("reasons", [])
+
+
 def _flat_by(session, rules: dict):
     from app.afterclose import flat_by_for
     return flat_by_for(session, rules)

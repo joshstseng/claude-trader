@@ -58,7 +58,8 @@ class AlertMessageTest(unittest.TestCase):
         self.assertIn("📰 ", desc)
         self.assertIn("finance.yahoo.com", desc)
         self.assertNotIn("Replay of", desc)
-        self.assertEqual(d["footer"]["text"], "Alert only, no order placed · paper · #12")
+        self.assertEqual(d["footer"]["text"],
+                         "Approve = bracket order on the paper account (entry, stop, target) · #12")
 
     def test_missing_odds_and_news_are_left_out_not_shown_as_empty(self):
         r = pipeline.SignalResult(self.r.strategy, self.r.symbol, self.r.date, self.r.folder,
@@ -82,13 +83,24 @@ class AlertMessageTest(unittest.TestCase):
         self.assertEqual(em.description.count("Your call"), 1)
         self.assertTrue(em.description.endswith("**Your call:** ✅ Took it · 10:17 AM ET"))
 
-    def test_tapped_button_is_highlighted(self):
-        took, skip = discord_bot.decision_view("live", 12, chosen="took").children
-        self.assertEqual((took.item.label, skip.item.label), ("✓ Took it", "Skip"))
-        took, skip = discord_bot.decision_view("live", 12, chosen="skip").children
-        self.assertEqual((took.item.label, skip.item.label), ("Took it", "✓ Skipped"))
-        took, skip = discord_bot.decision_view("live", 12).children
-        self.assertEqual((took.item.label, skip.item.label), ("Took it", "Skip"))
+    def test_approve_and_skip_buttons(self):
+        labels = lambda v: tuple(b.item.label for b in v.children)
+        self.assertEqual(labels(discord_bot.decision_view("live", 12)), ("Approve", "Skip"))
+        self.assertEqual(labels(discord_bot.decision_view("live", 12, chosen="skip")), ("Approve", "✓ Skipped"))
+        placed = discord_bot.decision_view("live", 12, chosen="approve", locked=True)
+        self.assertEqual(labels(placed), ("✓ Approved", "Skip"))
+        self.assertTrue(all(b.item.disabled for b in placed.children))      # no more taps after an order
+        self.assertEqual(placed.children[0].item.custom_id, "orb:approve:live:12")
+
+    def test_alerts_from_before_1b_keep_their_took_it_button(self):
+        old = discord_bot.decision_view("live", 3, chosen="took", kind="took")
+        self.assertEqual(tuple(b.item.label for b in old.children), ("✓ Took it", "Skip"))
+
+    def test_order_lines_stack_under_the_alert(self):
+        _, em = discord_bot.alert_message(12, "live", self.r)
+        em = discord_bot.with_order_line(em, "⏳ **Order sent** (paper): buy 8 TSLA")
+        em = discord_bot.with_order_line(em, "✅ **Filled** 8 TSLA at $364.49")
+        self.assertTrue(em.description.endswith("⏳ **Order sent** (paper): buy 8 TSLA\n✅ **Filled** 8 TSLA at $364.49"))
 
 
 class NewsLinesTest(unittest.TestCase):
@@ -114,6 +126,7 @@ class ButtonIdTest(unittest.TestCase):
         m = re.fullmatch(discord_bot.BUTTON_RE, "orb:skip:replay:7")
         self.assertEqual((m["action"], m["source"], m["sid"]), ("skip", "replay", "7"))
         self.assertIsNone(re.fullmatch(discord_bot.BUTTON_RE, "orb:buy:live:7"))   # no such action
+        self.assertEqual(re.fullmatch(discord_bot.BUTTON_RE, "orb:approve:live:9")["action"], "approve")
 
 
 class PauseTest(unittest.TestCase):

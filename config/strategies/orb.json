@@ -37,5 +37,15 @@
   "costs": {
     "pct_per_side": 0.0003,
     "note": "assumed spread + slippage until Step 1b measures real paper fills"
+  },
+  "orders": {
+    "enabled": false,
+    "entry": "limit",
+    "limit_buffer_r": 0.1,
+    "limit_buffer_pct": 0.1,
+    "fill_timeout_seconds": 120,
+    "stale_minutes": 5,
+    "stale_drift_r": 0.25,
+    "note": "Approve -> bracket order on the Alpaca PAPER account. OFF until Step 1b.6 (3:55 PM flatten) exists, so nothing can be left open overnight. enabled=false: Approve only records your choice."
   }
 }
