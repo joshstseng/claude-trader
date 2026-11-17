@@ -64,8 +64,10 @@ def _chart(symbol: str, bars: list[Bar]) -> dict:
 
 
 def signal_for(symbol: str, bars: list[Bar], session: Session, settings: dict, rules: dict, *,
-               cost_pct: float, focus_rank: int = 0) -> BtSignal | None:
-    """One stock, one day. None if it never triggered."""
+               cost_pct: float, focus_rank: int = 0, outcome_bars: list[Bar] | None = None) -> BtSignal | None:
+    """One stock, one day. None if it never triggered.
+    `outcome_bars`: score the trade on different bars than the ones that decided it (e.g. decide
+    on the free IEX feed, score on the whole market's bars, which is what a real fill would see)."""
     entry_mod, exit_mod, size_mod = skill.module("entry"), skill.module("exit"), skill.module("size")
     win = settings["scan_window"]
     check_at = session.at(dtime.fromisoformat(win["end"])) + timedelta(minutes=1)
@@ -113,7 +115,8 @@ def signal_for(symbol: str, bars: list[Bar], session: Session, settings: dict, r
         return sig
 
     o = outcomes.resolve(entry=sig.entry, stop=sig.stop, target=sig.target,
-                         entry_at=session.at(dtime.fromisoformat(sig.trigger_time)), bars=bars,
+                         entry_at=session.at(dtime.fromisoformat(sig.trigger_time)),
+                         bars=outcome_bars if outcome_bars is not None else bars,
                          flat_by=flat_by_for(session, rules), qty=sig.qty, cost_pct=cost_pct)
     sig.outcome = o.as_dict()
     return sig

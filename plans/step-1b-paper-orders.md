@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Not started (planned 2026-11-17)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -25,13 +25,23 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Not started (planned 2026-11-17
 
 ## Sub-steps
 
-### 1b.1 Live data: measure, then choose
+### 1b.1 Live data: measure, then choose ✅
 - **Backtest check:** download Alpaca's **IEX** 5-minute bars (free, historical) for ~3 months of focus lists and rerun the signal engine. How often do IEX-based signals match SIP-based ones (the backtest's)? How different are the results?
 - **Live audit (already possible with 1a):** after each close, compare each live alert's trigger bar (from Yahoo, as seen live) with Alpaca's full-market bar from 20 minutes later: same trigger? same volume ×?
 - **Choose:** Alpaca IEX if it agrees with SIP ≥ ~90% of the time; otherwise Yahoo with a 1-minute settle (alerts ~1 minute later)
 - Build the live bar source behind one interface (Alpaca IEX, with Yahoo as automatic fallback)
 
 **Done when:** the numbers are in, the source is chosen, and live checks read bars through it.
+
+**Results (2026-11-17):**
+- **IEX vs full market**, 66 days (Aug 17 → Nov 17, 2026), 13,200 stock-days ([app/backtest/feeds.py](../app/backtest/feeds.py)):
+  - same trigger bar only **23%** of the time (63% even with the volume filter off): IEX doesn't see the market's full high/low, so even the opening range differs
+  - IEX adds many signals that don't exist in full-market data (42% of all signals) and misses others (9%)
+  - IEX is missing at least one 9:30–11:30 bar on 11% of stock-days
+- **Decision: IEX is out. The live bot stays on Yahoo** (its settled prices match the full market exactly).
+- **Live audit built**: every day at 4:15 PM the bot reruns its focus list on full-market bars and adds a 🔎 **data check** line to `#daily-summary` (confirmed / different time / live-only / full-market-only), saved to `runs/<date>/orb/data_check.json`. Replaying the repo's Oct 19 Yahoo capture through it: 10 of 16 signals confirmed (CVX, HMC, TSLA, VRTX not real in full-market data; most full-market-only signals came after the capture ended)
+- If the daily data checks show Yahoo's live data is often wrong, revisit: a settle delay, or paid full-market real-time data
+- *Moved to 1b.2:* the live bar source interface (it's used when the live bot switches to the backtest engine)
 
 ### 1b.2 One engine for live and backtest
 - Live checks run the backtest's signal engine on live bars (same functions, same filters: $5 floor, missing-bar skip, alphabetical ties)
@@ -47,7 +57,7 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Not started (planned 2026-11-17
 **Done when:** `check.py` blocks a 4th trade, a trade over the daily loss limit and a trade the cash can't cover, in tests.
 
 ### 1b.4 Approve → order
-- Alert buttons become **[Approve] [Skip]**; only you can press them
+- Alert buttons become **[Approve] [Skip]**; only you can press them. **"Took it" is removed** (decided 2026-11-17): Approve replaces it
 - On Approve:
   1. **Stale check:** the alert is under N minutes old (proposed 5) and the price hasn't moved more than a set amount past the entry (proposed 0.25R) or below the stop. If it fails, it's refused, with the reason shown on the alert
   2. **Final risk check** (`check.py`, with a fresh price)
@@ -91,5 +101,4 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Not started (planned 2026-11-17
 - Strategy changes → Step 2 variations (independent of this plumbing)
 
 ## Open questions (to settle while building)
-- Exact stale-check limits (5 minutes, 0.25R?) and the entry limit buffer (0.1R / 0.1%?): start with these, adjust after a week of paper fills
-- Whether to keep "Took it" for alerts you trade elsewhere (probably not needed once Approve exists)
+- Exact stale-check limits (5 minutes, 0.25R?) and the entry limit buffer (0.1R / 0.1%?): start with these, adjust after a week of paper fills. *Stale check = refuse an approval that comes too late (over 5 minutes after the alert) or after the price has run more than 0.25R past the entry, or fallen below the stop, because buying then is a different trade from the one alerted.*

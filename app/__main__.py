@@ -61,7 +61,21 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
             await asyncio.sleep(600)
     if only_if_new and n == 0:
         return          # catch-up after a restart: nothing new, the summary was already posted
-    await post(afterclose.summary_text(trade_log, day, run_id=run_id, cost_pct=cost, scanned=scanned))
+    extra = None
+    focus_file = paths.RUNS_DIR / day / "orb" / "focus_symbols.json"
+    if scanned and focus_file.exists() and session is not None:
+        try:             # 1b.1 live audit: would full-market data have given the same signals?
+            import json as _json
+            check = await asyncio.to_thread(
+                afterclose.data_check, trade_log, day, _json.loads(focus_file.read_text()),
+                fetch=marketdata.bars_5m, session=session, settings=orb.settings, rules=rules,
+                cost_pct=cost, run_id=run_id)
+            (focus_file.parent / "data_check.json").write_text(_json.dumps(check, indent=1))
+            extra = afterclose.data_check_line(check)
+        except Exception:  # noqa: BLE001 - the audit never blocks the summary
+            logging.getLogger("app").exception("[ORB] data check for %s failed", day)
+    await post(afterclose.summary_text(trade_log, day, run_id=run_id, cost_pct=cost, scanned=scanned,
+                                       extra=extra))
 
 
 async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:

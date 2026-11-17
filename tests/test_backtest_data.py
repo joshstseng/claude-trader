@@ -80,7 +80,7 @@ class DayBarsCacheTest(Tmp):
         t = datetime(2026, 3, 2, 9, 30, tzinfo=NY)
         calls = []
 
-        def fake(symbols, day):
+        def fake(symbols, day, feed="sip"):
             calls.append(list(symbols))
             return {"AAA": [Bar(t, 1, 2, 0.5, 1.5, 100)]}      # BBB: no bars that day
 

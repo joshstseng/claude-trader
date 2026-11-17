@@ -48,6 +48,47 @@ def resolve_day(trade_log: tradelog.TradeLog, day: str, *, fetch: BarsFetcher, f
     return len(rows)
 
 
+def data_check(trade_log: tradelog.TradeLog, day: str, focus: list[str], *, fetch: BarsFetcher,
+               session: Session, settings: dict, rules: dict, cost_pct: float, strategy: str = "orb",
+               source: str = "live", run_id: int | None = None) -> dict:
+    """Step 1b.1's live audit: rerun the day's focus list on the whole market's bars (the backtest's
+    data) and compare with what the live bot signaled from Yahoo. Same stock and same trigger bar =
+    confirmed."""
+    from app.backtest import signals as bt
+    live = {r["symbol"]: r for r in trade_log.signals(strategy=strategy, source=source, date=day, run_id=run_id)}
+    bars = fetch(focus, date.fromisoformat(day))
+    full = {}
+    for sym in focus:
+        if sym in bars:
+            s = bt.signal_for(sym, bars[sym], session, settings, rules, cost_pct=cost_pct)
+            if s:
+                full[sym] = s
+    confirmed = sorted(s for s in live if s in full and full[s].trigger_time == live[s]["trigger_time"])
+    other_time = sorted(s for s in live if s in full and s not in confirmed)
+    live_only = sorted(s for s in live if s not in full)
+    full_only = sorted(s for s in full if s not in live)
+    return {"day": day, "focus": len(focus), "live": len(live), "full_market": len(full),
+            "confirmed": confirmed,
+            "other_time": [(s, live[s]["trigger_time"], full[s].trigger_time) for s in other_time],
+            "live_only": [(s, live[s]["trigger_time"]) for s in live_only],
+            "full_only": [(s, full[s].trigger_time) for s in full_only]}
+
+
+def data_check_line(c: dict) -> str:
+    """One line for the daily summary."""
+    if not c["live"] and not c["full_market"]:
+        return "🔎 Data check: no signals in live or full-market data."
+    parts = [f"🔎 **Data check** (live Yahoo vs full-market data): {len(c['confirmed'])} of {c['live']} "
+             f"live signals confirmed"]
+    if c["other_time"]:
+        parts.append("different time: " + ", ".join(f"{s} {a}→{b}" for s, a, b in c["other_time"][:5]))
+    if c["live_only"]:
+        parts.append("not in full-market data: " + ", ".join(s for s, _ in c["live_only"][:6]))
+    if c["full_only"]:
+        parts.append(f"{len(c['full_only'])} full-market signals the live bot didn't have")
+    return " · ".join(parts)
+
+
 def _group(items: list[dict]) -> tuple[str, float, float]:
     counts = {k: sum(1 for i in items if i["result"] == k) for k in ICON}
     parts = [f"{counts[k]} {ICON[k]}" for k in ("target", "stop", "flat", "no_data") if counts[k]]
@@ -62,7 +103,8 @@ def _fmt(r: float, usd: float, n: int) -> str:
 
 
 def summary_text(trade_log: tradelog.TradeLog, day: str, *, strategy: str = "orb", source: str = "live",
-                 run_id: int | None = None, cost_pct: float = 0.0003, scanned: bool = True) -> str:
+                 run_id: int | None = None, cost_pct: float = 0.0003, scanned: bool = True,
+                 extra: str | None = None) -> str:
     """The #daily-summary message (under Discord's 2,000 characters).
     `scanned=False`: the bot never checked today (e.g. it started after the scan window)."""
     label = datetime.strptime(day, "%Y-%m-%d").strftime("%a %b %-d")
@@ -71,7 +113,8 @@ def summary_text(trade_log: tradelog.TradeLog, day: str, *, strategy: str = "orb
     if not rows:
         if not scanned:
             return f"{tag}**[ORB] {label}** · no checks ran today (the bot started after the scan window)."
-        return f"{tag}**[ORB] {label}** · no signals today: no stock on the focus list broke out with enough volume."
+        return (f"{tag}**[ORB] {label}** · no signals today: no stock on the focus list broke out with enough volume."
+                + (f"\n{extra}" if extra else ""))
 
     items = []
     for r in rows:
@@ -105,6 +148,8 @@ def summary_text(trade_log: tradelog.TradeLog, day: str, *, strategy: str = "orb
                           for i in held[:12])
         more = f" +{len(held) - 12} more" if len(held) > 12 else ""
         lines.append(f"\n_Held back ({len(held)}):_ {shown}{more}")
+    if extra:
+        lines.append(f"\n{extra}")
     lines.append(f"\n-# R after {cost_pct * 100:.2f}% costs per side · flat at 3:55 PM if neither hit · "
                  f"alerts only, no orders were placed")
     text = "\n".join(lines)

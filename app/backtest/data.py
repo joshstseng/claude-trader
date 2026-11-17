@@ -202,15 +202,16 @@ def focus_for(day: date, store: DailyStore, fl: dict) -> dict:
 
 # ------------------------------------------------------------- 5-minute bars
 
-def day_bars(day: date, symbols: list[str], *, fetch: bool = True) -> dict[str, list[Bar]]:
-    """The day's 5-minute bars (9:30 to the close) for `symbols`, raw prices, cached per day."""
+def day_bars(day: date, symbols: list[str], *, fetch: bool = True, feed: str = "sip") -> dict[str, list[Bar]]:
+    """The day's 5-minute bars (9:30 to the close) for `symbols`, raw prices, cached per day.
+    feed "sip" (whole market, the backtest's default) or "iex" (the free real-time feed), cached apart."""
     from app.outcomes import bars_from_rows
-    f = M5_DIR / f"{day.isoformat()}.json.gz"
+    f = (M5_DIR if feed == "sip" else CACHE / f"5m-{feed}") / f"{day.isoformat()}.json.gz"
     doc = _read_gz(f) if f.exists() else {"day": day.isoformat(), "bars": {}, "empty": []}
     missing = [s for s in symbols if s not in doc["bars"] and s not in doc["empty"]]
     if missing and fetch:
         from app.marketdata import bars_5m
-        got = _retry(lambda: bars_5m(missing, day), f"5m bars {day}")
+        got = _retry(lambda: bars_5m(missing, day, feed=feed), f"5m bars {day} ({feed})")
         for s in missing:
             if got.get(s):
                 doc["bars"][s] = [[b.start.strftime("%H:%M"), b.o, b.h, b.l, b.c, b.v] for b in got[s]]

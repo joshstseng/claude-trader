@@ -67,6 +67,23 @@ class AfterCloseTest(unittest.TestCase):
         self.assertIn("no signals today", afterclose.summary_text(self.log, "2026-10-20"))
         self.assertIn("no checks ran today", afterclose.summary_text(self.log, "2026-10-20", scanned=False))
 
+    def test_data_check_against_full_market_bars(self):
+        """Live (Yahoo) said TSLA at 10:35; Alpaca's full-market bars don't confirm it (thin volume)."""
+        orb = strategies.load("orb")
+        c = afterclose.data_check(self.log, "2026-10-19", ["TSLA", "CDNS"], fetch=fake_fetch,
+                                  session=market.SkillCalendar().session(date(2026, 10, 19)),
+                                  settings=orb.settings, rules=settings.risk_rules(), cost_pct=0.0003,
+                                  run_id=self.bot.run_id)
+        self.assertEqual((c["live"], c["confirmed"]), (2, []))
+        self.assertEqual(c["live_only"], [("CDNS", "09:50"), ("TSLA", "10:35")])   # CDNS: no bars in the fake
+        line = afterclose.data_check_line(c)
+        self.assertTrue(line.startswith("🔎 **Data check** (live Yahoo vs full-market data): 0 of 2 live signals confirmed"))
+        self.assertIn("not in full-market data: CDNS, TSLA", line)
+
+    def test_extra_line_shows_even_on_a_quiet_day(self):
+        text = afterclose.summary_text(self.log, "2026-10-20", extra="🔎 Data check: x")
+        self.assertTrue(text.endswith("🔎 Data check: x"))
+
     def test_flat_by_moves_up_on_early_close(self):
         rules = settings.risk_rules()
         self.assertEqual(afterclose.flat_by_for(market.SkillCalendar().session(date(2026, 11, 27)), rules),

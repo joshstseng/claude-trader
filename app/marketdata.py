@@ -30,8 +30,10 @@ def _client():
 
 
 def bars_5m(symbols: list[str], day: date, *, start: dtime = dtime(9, 30),
-            end: dtime = dtime(16, 0)) -> dict[str, list[Bar]]:
-    """5-minute bars for one session day, New York time, regular hours by default."""
+            end: dtime = dtime(16, 0), feed: str = "sip") -> dict[str, list[Bar]]:
+    """5-minute bars for one session day, New York time, regular hours by default.
+    feed "sip" = the whole market (free plan: at least 15 minutes old); "iex" = the IEX exchange
+    only, but real-time on the free plan."""
     from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -42,7 +44,9 @@ def bars_5m(symbols: list[str], day: date, *, start: dtime = dtime(9, 30),
         req = StockBarsRequest(symbol_or_symbols=syms[i:i + BATCH],
                                timeframe=TimeFrame(5, TimeFrameUnit.Minute),
                                start=datetime.combine(day, start, tzinfo=NY),
-                               end=not_too_recent(datetime.combine(day, end, tzinfo=NY)), feed=DataFeed.SIP)
+                               end=(not_too_recent if feed == "sip" else (lambda x: x))(
+                                   datetime.combine(day, end, tzinfo=NY)),
+                               feed=DataFeed.SIP if feed == "sip" else DataFeed.IEX)
         data = _client().get_stock_bars(req).data
         for sym, bars in data.items():
             out[sym] = bars_from_alpaca(bars)
