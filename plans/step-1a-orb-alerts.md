@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -74,7 +74,7 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** the structure is in place and the repo's own tests still pass (`python3 -m unittest discover -s day-trader-skill/tests`).
 
-### 1a.2 Accounts *(you, with a walkthrough)*
+### 1a.2 Accounts *(you, with a walkthrough)* ✅
 - **Alpaca:** sign up, switch to Paper, generate API keys, put them in `.env`
 - **Discord:** create a private server; create `#setups`, `#trades`, `#daily-summary` and `#system`; create the bot in the Developer Portal; invite it with permission to post and use buttons; set phone notifications to "All messages" on `#setups` and `#trades`; copy your user ID
 - A check command: `python -m app.check`
