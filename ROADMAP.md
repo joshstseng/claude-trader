@@ -96,6 +96,9 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
   - Scan window: 9:50–11:30 AM vs later breakouts (up to 3:30 PM)
   - Volume check on the trigger bar: off vs 1.0× vs 1.5×
   - Focus list size and how signals are picked
+  - **Ranking vs first come, first served** *(noted 2026-11-17)*: in the Oct 19 replay the 5 earliest signals (CDNS, CVX, HUM, ELV, EOG, all by 9:55) used the whole daily cap, so later ones like TSLA, MSFT and AMZN were held back. Test ranking by volume ×, % over the range, or dollars traded instead
+  - **Minimum stop distance** *(noted 2026-11-17)*: HMC's stop was only $0.05 (0.15%) below the entry, which gave 110 shares. A stop that tight is likely to be hit by normal price wiggle and the bid-ask spread. Test a minimum stop distance (e.g. a % of price or a multiple of ATR)
+- **Discord `#backtests` channel:** one short summary per backtest run (settings, trade count, win rate, average R, expectancy, max drawdown, compared with the baseline), with a link to the full report. Create the channel when this step starts
 
 **Gate:** expected profit per trade is positive after costs, and the backtest roughly matches live paper results. If not, tune the setups or rules and backtest again (as many runs as needed).
 
