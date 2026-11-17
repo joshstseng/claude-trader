@@ -1,6 +1,6 @@
 # Step 1a: ORB bot alerts + trade log
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1a.1 ✅ 1a.2 ✅ 1a.3 ✅ 1a.4 ✅)
 
 **Goal:** the **ORB bot** runs every market day without help, sends setups with a full plan to Discord and logs every signal with what it would have done. **No orders are placed in this step.**
 
@@ -88,8 +88,8 @@ All of these live in settings files, not in code, so the backtest can vary them.
 
 **Done when:** replaying TSLA on 2026-10-19 produces the known plan: entry 364.18 at 10:15, stop 358.32, 8 shares.
 
-### 1a.4 Trade log (SQLite)
-- Tables: days, signals, plans, alerts, responses (your button taps), outcomes
+### 1a.4 Trade log (SQLite) ✅
+- Tables: runs (a live day, a replay or a backtest, with a settings snapshot and git commit), signals (each with its plan), alerts, responses (your button taps), outcomes. Only triggered breakouts become signals
 - Every row tagged with `strategy` (`orb`), `source` (`live` / `replay` / `backtest`) and a settings snapshot (which settings were in effect)
 - Designed so the Step 2 backtest writes into the same tables
 
