@@ -73,6 +73,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
   - **Alpaca doesn't close positions at the end of the day.** At the close it cancels a bracket's stop and target orders but leaves the shares in the account. So at 3:55 PM (12:55 PM on early-close days) the app must cancel any remaining stop/target orders and sell at market
   - **Backup:** a second check at 3:58 PM flattens anything still open, and @mentions you in `#system` if a position is still open after that (e.g. the app was down mid-redeploy). Nothing is ever held overnight
 - Market data switches from Yahoo (delayed) to Alpaca's live feed (free IEX)
+  - *Found in Step 2.2:* Yahoo's **newest** 5-minute bar during the session can have badly wrong volume (TSLA 10:30 on Oct 19: ~25× too high), and the live bot reads exactly that bar for its volume check. But Alpaca's free real-time feed is IEX only (one exchange, a few % of volume), and its full feed (SIP) is 15 minutes delayed. Options: IEX volume ratios, waiting one extra minute for Yahoo to settle, or a paid SIP plan. Decide here
 - Records real fill prices, so we can measure how much worse fills are than the chart price
 
 **Gate:** a few weeks of paper trades without errors, with fills, stops, targets and flattens all handled correctly.

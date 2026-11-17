@@ -64,12 +64,25 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 - TSLA Oct 19 (Alpaca bars): the v1 signal went **flat** at 3:55 PM, +0.17R after costs. Best +0.52R, never near the stop
 - Found while building it: **Alpaca and Yahoo report very different 5-minute volume** (TSLA 10:30 bar: 0.4× vs 7.98× the range average). Prices match. This affects the volume filter, so it gets measured in 2.3
 
-### 2.2 Historical data
+### 2.2 Historical data ✅
 - Alpaca 5-minute bars (SIP) for each day's focus list; daily bars for the whole stock list
 - Local cache in `data/bars/`, so each day is downloaded once
 - Historical focus list for each day (no look-ahead)
 
 **Done when:** 2 years are downloaded and cached, and the focus list for any past day can be rebuilt.
+
+**As built** ([app/backtest/data.py](../app/backtest/data.py), `python -m app backtest-data --from … --to …`):
+- **512 market days, 2024-11-01 → 2026-11-17**, downloaded in 21 min; reruns only fetch what's missing. 176 MB in `data/bars/` (git-ignored)
+- Calendar from Alpaca, including the 5 early closes in the range (the skill's calendar only covers 2026–2027)
+- Daily bars (split-adjusted) for 5,928 of 5,929 stocks; 5-minute bars (raw prices) for each day's 200 focus stocks (199–200 found every day)
+- Focus list per day, the same way the live bot builds it: last session's price × volume, plus the skill's own `find_setups` on ~3 months of closes, nothing from the day itself
+- **Check: the backtest's focus list for Nov 18 matched the live bot's (built from Yahoo after the close) 200 of 200**
+- Safety: requests stop 16 minutes before "now" (the free plan refuses fresher SIP data); a failed download is never cached; a bad symbol is isolated by splitting the batch
+
+**Data findings (Oct 19, 232 stocks, Alpaca vs the repo's saved Yahoo data):**
+- Prices are identical (median difference 0.000%, 95% within 0.03%)
+- Volume matches bar for bar, except: the **9:30 bar** (Alpaca ~18% lower, since the opening auction is counted differently), and **Yahoo's newest bar while the market is open** (TSLA's 10:30 bar: ~25× too high)
+- The volume filter agrees 94% of the time. TSLA's "10:35 trigger at 7.98×" in our replays came from that bad newest bar: with correct volume it was 0.4× and wouldn't have triggered
 
 ### 2.3 Signal engine
 - The live ORB rules applied to history, in-process (fast), using the same logic as the skill's scripts

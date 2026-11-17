@@ -234,6 +234,17 @@ def cmd_summary(a) -> int:
     return 0
 
 
+def cmd_backtest_data(a) -> int:
+    """Download (or reuse) the historical data a backtest needs."""
+    from app.backtest import data
+    logs.setup()
+    orb = strategies.load("orb")
+    out = data.prepare(date.fromisoformat(a.start), date.fromisoformat(a.end), orb.settings["focus_list"],
+                       progress=lambda m: logging.getLogger("app").info("[backtest data] %s", m))
+    print(out)
+    return 0
+
+
 def main(argv=None) -> int:
     settings.load_env()
     p = argparse.ArgumentParser(prog="python -m app")
@@ -253,8 +264,13 @@ def main(argv=None) -> int:
     sm.add_argument("--run", type=int, help="only this run (e.g. one replay)")
     sm.add_argument("--db", help="trade log file (default: the live or replay log)")
     sm.add_argument("--post", action="store_true", help="also post it to #daily-summary")
+    bd = sub.add_parser("backtest-data", help="download (or reuse) historical bars for a backtest")
+    bd.add_argument("--from", dest="start", required=True, help="YYYY-MM-DD")
+    bd.add_argument("--to", dest="end", required=True, help="YYYY-MM-DD")
     sub.add_parser("check", help="Alpaca + Discord connection check")
     a = p.parse_args(argv)
+    if a.cmd == "backtest-data":
+        return cmd_backtest_data(a)
     if a.cmd == "summary":
         return cmd_summary(a)
     if a.cmd == "run":

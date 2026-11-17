@@ -6,18 +6,25 @@ after-close step runs at 4:15 PM, and the backtest only reads the past.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime, time as dtime, timedelta
 from functools import lru_cache
 
 from app import settings
 from app.outcomes import NY, Bar, bars_from_alpaca
 
 BATCH = 100   # symbols per request
+SIP_DELAY = timedelta(minutes=16)   # the free plan refuses SIP data from the last 15 minutes
+
+
+def not_too_recent(t: datetime) -> datetime:
+    """Clamp a request's end so the free plan doesn't refuse it."""
+    return min(t, datetime.now(NY) - SIP_DELAY)
 
 
 @lru_cache(maxsize=1)
 def _client():
     from alpaca.data.historical import StockHistoricalDataClient
+    settings.load_env()
     a = settings.alpaca_settings()
     return StockHistoricalDataClient(a.api_key, a.secret_key)
 
@@ -35,7 +42,7 @@ def bars_5m(symbols: list[str], day: date, *, start: dtime = dtime(9, 30),
         req = StockBarsRequest(symbol_or_symbols=syms[i:i + BATCH],
                                timeframe=TimeFrame(5, TimeFrameUnit.Minute),
                                start=datetime.combine(day, start, tzinfo=NY),
-                               end=datetime.combine(day, end, tzinfo=NY), feed=DataFeed.SIP)
+                               end=not_too_recent(datetime.combine(day, end, tzinfo=NY)), feed=DataFeed.SIP)
         data = _client().get_stock_bars(req).data
         for sym, bars in data.items():
             out[sym] = bars_from_alpaca(bars)
