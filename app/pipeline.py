@@ -26,6 +26,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from app import engine, market, paths, skill
+from app.account import DayAccount
 from app.strategies import Strategy
 
 NY = ZoneInfo("America/New_York")
@@ -213,7 +214,9 @@ def run_signal(
         return result
 
     # 4. risk: PASS / BLOCK against the rules, counting today's shared state
-    r = step("risk", ["--json", "--state", str(day_state / "broker.json"), "--today", date, *clock])
+    acct = DayAccount.for_day(runs_root, date, risk_rules)      # today's simulated $5k account (1b.3)
+    r = step("risk", ["--json", "--state", str(acct.broker_file), "--portfolio", str(acct.portfolio_file),
+                      "--today", date, *clock])
     verdict = (result.risk or {}).get("verdict")
     if verdict == "PASS":
         result.status = "pass"

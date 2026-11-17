@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -55,12 +55,14 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 - Live path checked against Yahoo's real data (TSLA, 0.2 s per stock); a full-day replay now takes ~2.5 s instead of ~16 s
 - The live bot now uses Alpaca's session hours (early closes) when planning the flat-by time
 
-### 1b.3 Simulated $5k account + real risk state
+### 1b.3 Simulated $5k account + real risk state ✅
 - `portfolio.json` (cash, open positions) and today's placed orders kept up to date for `check.py`, so it enforces **3 trades a day, the $150 daily loss limit and the cash limit** on real entries
 - **Account resets to $5,000 every morning** (decided 2026-11-17): each day is independent, like the backtest. Nothing is held overnight
 - **But every execution is kept forever** (your requirement): each order, fill and exit with its P&L in the trade log, plus a **running total P&L** across all days in the daily summary and a `/pnl` command
 
 **Done when:** `check.py` blocks a 4th trade, a trade over the daily loss limit and a trade the cash can't cover, in tests.
+
+**As built** ([app/account.py](../app/account.py)): a day account in `runs/<date>/state/` keeps `account.json` (positions, entries, exits, P&L) and writes the two files the skill's `check.py` reads: `broker.json` (entries placed today, with their max losses) and `portfolio.json` (cash = $5,000 minus open positions' cost, matching the backtest's cash rule). Every signal's risk check now uses them. An entry that never fills is un-counted; a closed position frees its cash; the record survives restarts; each day starts fresh at $5,000. Nothing writes to it yet: 1b.4 (orders) and 1b.5 (fills) will.
 
 ### 1b.4 Approve → order
 - Alert buttons become **[Approve] [Skip]**; only you can press them. **"Took it" is removed** (decided 2026-11-17): Approve replaces it
