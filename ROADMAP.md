@@ -70,6 +70,8 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 - Stale-approval check: refuses an approval that comes in too late or after the price has moved too far from the entry
 - Tracks fills, stops hit and targets hit; posts them to `#trades`
 - Position tracking and the 3:55 PM flatten, which also works after a mid-day restart
+  - **Alpaca doesn't close positions at the end of the day.** At the close it cancels a bracket's stop and target orders but leaves the shares in the account. So at 3:55 PM (12:55 PM on early-close days) the app must cancel any remaining stop/target orders and sell at market
+  - **Backup:** a second check at 3:58 PM flattens anything still open, and @mentions you in `#system` if a position is still open after that (e.g. the app was down mid-redeploy). Nothing is ever held overnight
 - Market data switches from Yahoo (delayed) to Alpaca's live feed (free IEX)
 - Records real fill prices, so we can measure how much worse fills are than the chart price
 
