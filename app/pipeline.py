@@ -1,6 +1,8 @@
-"""Takes one signal through the day-trader-skill scripts:
+"""Takes one signal through the ORB bot's steps:
 
-    entry -> exit -> budget -> risk -> (time machine -> news, only when the signal will be alerted)
+    entry + stop/target + shares   app.engine.decide (in-process; the same code the backtest runs)
+    risk                           the skill's check.py (the final gate)
+    time machine, news             the skill's scripts, only when the signal will be alerted
 
 Each signal runs in its own folder, runs/<date>/<strategy>/<TICKER>/, because the
 scripts keep one trade at a time in fixed files (trader/entry.json, trader/plan.json).
@@ -18,12 +20,12 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time as dtime
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from app import paths
+from app import engine, market, paths, skill
 from app.strategies import Strategy
 
 NY = ZoneInfo("America/New_York")
@@ -98,6 +100,11 @@ class SignalResult:
         return (r.get("results") or [None])[0] if r else None
 
 
+def _flat_by(session, rules: dict):
+    from app.afterclose import flat_by_for
+    return flat_by_for(session, rules)
+
+
 def _today_ny() -> str:
     return datetime.now(NY).strftime("%Y-%m-%d")
 
@@ -141,6 +148,7 @@ def run_signal(
     sec_user_agent: str | None = None,
     with_news: bool = True,
     want_extras: Callable[[SignalResult], bool] | None = None,
+    session: "market.Session | None" = None,
 ) -> SignalResult:
     """Run one symbol through the whole pipeline. Never raises for a step failure:
     the result's status and reason say what happened.
@@ -170,36 +178,38 @@ def run_signal(
         result.steps[name] = r
         return r
 
-    # 1. entry: has the ORB triggered?
-    args = ["check", symbol, "--setup", "orb", "--interval", s["interval"],
-            "--or-minutes", str(s["opening_range_minutes"]), "--json", "--write", *clock]
-    if s.get("min_volume_x"):
-        args += ["--min-volume-x", str(s["min_volume_x"])]
-    if off.entry:
-        args += ["--offline", str(off.entry)]
-    e = step("entry", args)
-    if e.data is None:
-        result.reason = f"entry: {e.error}"
+    # 1-3. entry, stop/target and shares: app.engine.decide, the same code the backtest runs
+    entry_mod, size_mod = skill.module("entry"), skill.module("size")
+    when = (datetime.strptime(now, "%Y-%m-%d %H:%M").replace(tzinfo=NY) if now else datetime.now(NY))
+    sess = session or market.SkillCalendar().session(when.date()) or market.Session(when.date(), dtime(9, 30), dtime(16, 0))
+    try:
+        chart = entry_mod.get_chart(symbol, s["interval"], when.date(), offline=str(off.entry) if off.entry else None)
+    except Exception as e:  # noqa: BLE001 - Yahoo down, unknown ticker, bad file: one plain line
+        result.steps["entry"] = StepResult("entry", False, 1, error=str(e))
+        result.reason = f"entry: {e}"
         return result
-    if e.data.get("status") != "triggered":
-        result.status = e.data.get("status") or "error"
-        result.reason = e.data.get("reason", "")
+    d = engine.decide(symbol, chart, sess, when, s, risk_rules, flat_by=_flat_by(sess, risk_rules))
+    utc = engine.to_utc_naive(when)
+    entry_mod.write_json(str(folder / "trader" / "entry.json"), entry_mod.entry_doc(d.entry_res, utc))
+    result.steps["entry"] = StepResult("entry", d.triggered, 0, data=entry_mod.public(d.entry_res))
+    if not d.triggered:
+        result.status, result.reason = d.entry_res.get("status") or "error", d.entry_res.get("reason", "")
         return result
-
-    # 2. exit: stop and target
-    x = step("exit", ["plan", "--stop", s["exit"]["stop"], "--target", s["exit"]["target"],
-                      "--json", "--write", *clock])
-    if not x.ok:
-        result.status = "refused"
-        result.reason = f"exit plan: {x.error or (x.data or {}).get('error', 'refused')}"
+    if d.status == "skipped":
+        result.status, result.reason = "skipped", d.reason
         return result
-
-    # 3. budget: how many shares
-    b = step("budget", ["--json", "--write", *clock])
-    refusal = (b.data or {}).get("sizing", {}).get("refusal") if b.data else None
-    if not b.ok or refusal or not (b.data or {}).get("orders"):
-        result.status = "refused"
-        result.reason = f"budget: {refusal or b.error or 'no order'}"
+    if d.plan:
+        (folder / "trader" / "plan.json").write_text(json.dumps(d.plan, indent=2))
+        result.steps["exit"] = StepResult("exit", True, 0, data=d.plan)
+    if d.sizing:
+        orders = [d.order] if d.order else []
+        result.steps["budget"] = StepResult("budget", d.order is not None, 0,
+                                            data={"sizing": d.sizing, "orders": orders, "notes": []})
+        if d.order:
+            size_mod.write_orders(str(folder / "trader" / "orders.json"), orders, risk_rules,
+                                  source="trader/plan.json", now_utc=utc)
+    if d.status == "refused":
+        result.status, result.reason = "refused", d.reason
         return result
 
     # 4. risk: PASS / BLOCK against the rules, counting today's shared state

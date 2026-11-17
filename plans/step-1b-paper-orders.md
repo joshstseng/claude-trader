@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -43,12 +43,17 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅)
 - If the daily data checks show Yahoo's live data is often wrong, revisit: a settle delay, or paid full-market real-time data
 - *Moved to 1b.2:* the live bar source interface (it's used when the live bot switches to the backtest engine)
 
-### 1b.2 One engine for live and backtest
+### 1b.2 One engine for live and backtest ✅
 - Live checks run the backtest's signal engine on live bars (same functions, same filters: $5 floor, missing-bar skip, alphabetical ties)
 - The ORB scan pre-filter, the Time Machine and news stay as they are (information for the alert)
 - Test: replaying a day through the live path gives the same signals as the backtest for that day
 
 **Done when:** a replayed day gives identical signals both ways.
+
+**As built** ([app/engine.py](../app/engine.py)): `engine.decide` is the one decision function. It calls the skill's `entry.evaluate`, `exit.compute` and `size.size_trade` plus the live scan's filters (price floor, missing bar). The live pipeline calls it with Yahoo charts fetched by the skill's own `entry.get_chart` (same fetch as before) at each check; the backtest calls it with full-market bars at the window's last check. The skill's `check.py` (risk), Time Machine and news still run as scripts.
+- Test: the full Oct 19 day through the live bot (21 checks, scan pre-filter) = the backtest's 16 signals, exactly
+- Live path checked against Yahoo's real data (TSLA, 0.2 s per stock); a full-day replay now takes ~2.5 s instead of ~16 s
+- The live bot now uses Alpaca's session hours (early closes) when planning the flat-by time
 
 ### 1b.3 Simulated $5k account + real risk state
 - `portfolio.json` (cash, open positions) and today's placed orders kept up to date for `check.py`, so it enforces **3 trades a day, the $150 daily loss limit and the cash limit** on real entries

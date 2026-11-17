@@ -117,6 +117,7 @@ class OrbDay:
         self.pause_source: Callable[[], bool] | None = None   # e.g. the app's /pause setting
         self.focus: list[str] = []
         self.checks = 0                   # checks run by this process today
+        self.session = None               # today's market hours (set by the scheduler)
         self.done: set[str] = set()       # signaled, expired or failed for good today
         self.signal_ids: dict[str, int] = {}
         self.workdir = runs_root / day / strategy.id
@@ -219,7 +220,7 @@ class OrbDay:
             # the slow time machine and news only run for a signal that will be alerted
             result = pipeline.run_signal(self.strategy, sym, self.rules, now=now, offline=offline,
                                          runs_root=self.runs_root, sec_user_agent=self.sec_user_agent,
-                                         want_extras=lambda res: decide(res)[0])
+                                         want_extras=lambda res: decide(res)[0], session=self.session)
             if not tradelog.is_signal(result):
                 if result.status != "waiting":     # expired, no data, error: stop checking it today
                     self.done.add(sym)

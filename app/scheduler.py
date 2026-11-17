@@ -65,6 +65,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
     s = day_bot.s
     as_arg = (lambda t: t.strftime("%Y-%m-%d %H:%M")) if simulated else (lambda t: None)
     times = [t for t in market.check_times(session, s) if clock.now() <= t + timedelta(minutes=2)]
+    day_bot.session = session
     if state:
         state.day, state.session = day_bot, session
 

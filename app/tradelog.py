@@ -134,8 +134,9 @@ def code_version() -> str | None:
 
 
 def is_signal(result: SignalResult) -> bool:
-    """True once the entry triggered. 'waiting' / 'expired' checks are not signals."""
-    return (result.entry or {}).get("status") == "triggered"
+    """True once the entry triggered. 'waiting' / 'expired' checks are not signals, and neither is a
+    chart the live scan's filters skip (price floor, missing bar)."""
+    return (result.entry or {}).get("status") == "triggered" and result.status != "skipped"
 
 
 def _f(x: Any) -> float | None:

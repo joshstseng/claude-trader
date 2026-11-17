@@ -57,6 +57,30 @@ class MatchesLivePipelineTest(unittest.TestCase):
         self.assertEqual(got, LIVE_OCT19)                      # same signals, same order (FCFS)
 
 
+class LiveAndBacktestAgreeTest(unittest.TestCase):
+    def test_full_day_through_the_live_bot_equals_the_backtest(self):
+        """Step 1b.2: the live bot (every 5-minute check, Yahoo charts, scan pre-filter) and the
+        backtest (one pass at the window's end) give the same signals: one engine."""
+        import asyncio
+        import tempfile
+        from pathlib import Path
+        from app import market, tradelog
+        from app.routine import DayData, LogAlerter, OrbDay
+        from app.scheduler import SimClock, run_day
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            log = tradelog.TradeLog(root / "t.db")
+            bot = OrbDay(strategies.load("orb"), settings.risk_rules(), log, source="replay", day="2026-10-19",
+                         alerter=LogAlerter(), runs_root=root / "runs",
+                         day_data=DayData(bars=WALL, entry_dir=market.split_bundle(WALL, root / "bars")))
+            clock = SimClock(datetime.combine(OCT19.day, dtime(7, 0), tzinfo=NY))
+            asyncio.run(run_day(bot, OCT19, clock, simulated=True))
+            rows = log.signals(run_id=bot.run_id)
+            live = sorted((r["symbol"], r["trigger_time"], r["entry"], r["stop"], r["target"], r["qty"]) for r in rows)
+            log.close()
+        self.assertEqual(live, sorted(LIVE_OCT19))
+
+
 class SignalRulesTest(unittest.TestCase):
     rules = settings.risk_rules()
 
