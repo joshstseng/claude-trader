@@ -103,12 +103,24 @@ then: selection rules (cap 5 FCFS, trades/day, daily loss stop) → results → 
 - 37% of trades reached +1R at some point, but only 13% reached +2R (relevant for 1R vs 2R)
 - Rough cap-5 first come first served: about −0.03R a trade (2.4 will do this properly, with the daily trade and loss limits)
 
-### 2.4 Selection rules + costs
+### 2.4 Selection rules + costs ✅
 - Cap N a day, first come first served (baseline)
 - Max trades a day and the daily loss limit, from `config/risk.json`
 - Room for more rules later (ranking, minimum stop distance)
 
 **Done when:** selection rules apply to saved signals in seconds.
+
+**As built** ([app/backtest/select.py](../app/backtest/select.py)): 2 years in 0.02 s. Each day, in trigger order: the first 5 tradable signals are alerted, you approve all, then the risk check's own daily rules apply: max 3 entries; the max losses at the stops of today's entries + this one ≤ $150 (win or lose); and, optionally, **cash** (open positions + this one ≤ $4,500, with positions freeing their cash when they exit). Every signal gets a reason it was or wasn't taken.
+
+**Results (v1 settings, 2024-11-01 → 2026-11-17):**
+
+| View | Trades | Avg per trade | Total | Worst drawdown |
+|---|---|---|---|---|
+| Every signal | 20,602 | −0.082R | −$50,853 | −$51,937 |
+| Cap 5 FCFS + risk rules, cash limit off | 1,536 (3 a day, every day) | −0.043R | −$2,304 | −$3,147 |
+| Cap 5 FCFS + risk rules, cash limit on | 683 (~1.3 a day) | −0.038R | −$650 | −$1,664 |
+
+The $150 daily loss rule never binds (3 trades × at most $50 = $150). **Open decision: is the cash limit on or off in the baseline?** A real $5k account without margin can usually hold only one ~$3,500 position at a time; Alpaca's paper account has $100k+ and would allow all 3.
 
 ### 2.5 Runs + reports
 - `python -m app backtest --from 2024-11-01 --to 2026-11-16 [--set exit.target=1R] [--label "…"]`
