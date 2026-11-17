@@ -211,7 +211,7 @@ def cmd_replay(a) -> int:
         msgs = []
         for sid, res in alerter.sent:
             preview, embed = alert_message(sid, "replay", res)
-            msgs.append((preview, embed, decision_view("replay", sid)))
+            msgs.append((f"<@{dcfg.owner_id}> {preview}", embed, decision_view("replay", sid)))
         ids = asyncio.run(post_once(dcfg, dcfg.channel_setups, msgs))
         for (sid, _), mid in zip(alerter.sent, ids):
             trade_log.record_alert(sid, sent=True, channel_id=dcfg.channel_setups, message_id=mid)

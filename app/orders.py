@@ -66,11 +66,13 @@ class OrderDesk:
 
     def _approve(self, signal_id: int, user_id=None, *, source: str = "live") -> Outcome:
         sig = self.log.signal(signal_id)
+        if source != "live":                             # replay / test alerts never order
+            if sig is not None:
+                self.log.record_response(signal_id, "took", user_id=user_id)
+            return Outcome(False, "📝 Test/replay alert: approval noted, **no order is placed**. On a live "
+                                  "alert this would run the stale check, the risk check and send the bracket order.")
         if sig is None:
             return Outcome(False, "⛔ I can't find that signal in the log.")
-        if source != "live":
-            self.log.record_response(signal_id, "took", user_id=user_id)
-            return Outcome(False, "📝 Replay alert: your approval is recorded, no order is placed.")
         if self.log.order_for_signal(signal_id) is not None:
             return Outcome(False, "Already placed: one order per alert.")
         if not self.o.get("enabled", False):

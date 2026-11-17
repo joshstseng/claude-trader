@@ -45,6 +45,7 @@ class FakeBroker:
 def orb_settings(**orders):
     s = copy.deepcopy(strategies.load("orb").settings)
     s["min_volume_x"] = None
+    s["orders"]["enabled"] = True            # on for these tests, whatever the deployed config says
     s["orders"].update(orders)
     return s
 
@@ -131,7 +132,7 @@ class OrderDeskTest(unittest.TestCase):
 
     def test_replay_alerts_never_order(self):
         out = self.desk().approve(self.sid, source="replay")
-        self.assertIn("Replay alert", out.text)
+        self.assertIn("no order is placed", out.text)
         self.assertEqual(self.broker.orders, [])
 
     def test_unfilled_entry_is_cancelled_and_uncounted(self):

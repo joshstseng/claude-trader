@@ -192,13 +192,16 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
     async def callback(self, interaction: discord.Interaction) -> None:
         bot: TraderBot = interaction.client  # type: ignore[assignment]
         trade_log = bot.trade_log(self.source)
-        if trade_log.signal(self.signal_id) is None:
+        known = trade_log.signal(self.signal_id) is not None
+        if not known and self.source == "live":
             await interaction.response.send_message("I can't find that signal in the log.", ephemeral=True)
             return
+        # replay / test alerts may have been posted from another machine: they work without a log row
         embed = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
         now = datetime.now().astimezone()
         if self.action != "approve":                     # Skip (or an old "Took it"): just record it
-            trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
+            if known:
+                trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
             view = decision_view(self.source, self.signal_id, chosen=self.action, kind=self._kind(interaction))
             await interaction.response.edit_message(
                 embed=with_response(embed, self.action, now) if embed else discord.utils.MISSING, view=view)
@@ -305,7 +308,8 @@ class TraderBot(discord.Client):
         await self.ready.wait()
         preview, embed = alert_message(signal_id, source, r)
         ch = self.channel(self.cfg.channel_setups)
-        msg = await ch.send(preview, embed=embed, view=decision_view(source, signal_id))
+        msg = await ch.send(f"<@{self.cfg.owner_id}> {preview}", embed=embed,     # @you: a trade is ready
+                            view=decision_view(source, signal_id))
         return ch.id, msg.id
 
     def follow_entry(self, message: discord.Message, client_id: str) -> None:
