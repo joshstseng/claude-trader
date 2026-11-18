@@ -141,6 +141,7 @@ class OrderDesk:
         # 5. bookkeeping
         acct.record_entry(sym, qty, limit, sizing["max_loss"], signal_id=signal_id)
         self.log.add_order(signal_id, client_id, sym, qty, limit, stop, target, broker_order_id=info.broker_id)
+        self.log.update_order(client_id, stop_order_id=info.stop_id, target_order_id=info.target_id)
         self.log.record_response(signal_id, "took", user_id=user_id)
         log.info("[ORB] order placed: buy %d %s limit %.2f stop %.2f target %.2f (%s)", qty, sym, limit, stop,
                  target, client_id)
@@ -159,6 +160,10 @@ class OrderDesk:
         if info.status == "filled":
             self.log.update_order(client_id, status="filled", filled_qty=info.filled_qty,
                                   filled_price=info.filled_price, filled_at=self.now().isoformat(timespec="seconds"))
+            if info.filled_price and info.filled_qty:
+                sig = self.log.signal(row["signal_id"])
+                DayAccount.for_day(self.runs_root, sig["date"], self.rules).update_fill(
+                    row["symbol"], info.filled_qty, info.filled_price)
             slip = (info.filled_price or 0) - (row["limit_price"] or 0)
             return Outcome(True, f"✅ **Filled** {info.filled_qty} {row['symbol']} at {_money(info.filled_price)} "
                                  f"({'−' if slip < 0 else '+'}{_money(abs(slip))} vs the limit). "

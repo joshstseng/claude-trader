@@ -16,6 +16,8 @@ class OrderInfo:
     status: str            # Alpaca's: new / accepted / partially_filled / filled / canceled / rejected / ...
     filled_qty: int
     filled_price: float | None
+    stop_id: str | None = None      # the bracket's stop-loss order
+    target_id: str | None = None    # the bracket's take-profit order
 
 
 class AlpacaPaper:
@@ -32,7 +34,15 @@ class AlpacaPaper:
     def _info(o) -> OrderInfo:
         status = getattr(o.status, "value", str(o.status))
         price = float(o.filled_avg_price) if o.filled_avg_price else None
-        return OrderInfo(str(o.id), o.client_order_id, status, int(float(o.filled_qty or 0)), price)
+        stop_id = target_id = None
+        for leg in getattr(o, "legs", None) or []:
+            kind = getattr(leg.type, "value", str(leg.type))
+            if kind == "limit":
+                target_id = str(leg.id)
+            elif kind in ("stop", "stop_limit"):
+                stop_id = str(leg.id)
+        return OrderInfo(str(o.id), o.client_order_id, status, int(float(o.filled_qty or 0)), price,
+                         stop_id, target_id)
 
     def bracket_buy(self, symbol: str, qty: int, limit_price: float, stop: float, target: float,
                     client_id: str) -> OrderInfo:

@@ -306,6 +306,18 @@ class TraderBot(discord.Client):
         await self.ready.wait()
         await self.channel(self.cfg.channel_trades).send(text[:1990])
 
+    async def note_on_alert(self, signal_id: int, text: str) -> None:
+        """Add a status line under a live alert (e.g. bought, stopped out)."""
+        a = self.trade_log("live").alert(signal_id)
+        if not a or not a["message_id"] or not a["channel_id"]:
+            return
+        ch = self.get_channel(int(a["channel_id"]))
+        if ch is None:
+            return
+        msg = await ch.fetch_message(int(a["message_id"]))
+        if msg.embeds:
+            await msg.edit(embed=with_order_line(msg.embeds[0], text))
+
     async def post_daily(self, text: str) -> None:
         await self.ready.wait()
         await self.channel(self.cfg.channel_daily_summary).send(text)

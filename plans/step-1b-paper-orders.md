@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅ 1b.4 ✅ 1b.6 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1–1b.6 ✅ · paper orders ON since 2026-11-17)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -78,12 +78,19 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 - Tested with a fake broker (10 cases) and **on the real paper account**: a bracket was accepted with its stop and target legs, a repeated client id was refused by Alpaca, and the order cancelled cleanly
 - **Shipped with `orders.enabled: false`** until 1b.6 (3:55 PM flatten) exists, so an approved trade can't be left open overnight
 
-### 1b.5 Tracking fills and exits
+### 1b.5 Tracking fills and exits ✅
 - Alpaca's live trade updates (stream): entry fills, partial fills, stop hits, target hits
 - Posts to **`#trades`**: filled, stopped ❌, target ✅, flattened ➖, with real P&L
 - Trade log: new `orders` / `fills` records (every execution, kept forever, with its P&L). **Slippage** = fill price vs plan price, on entry and exit
 
 **Done when:** every state change of a paper trade shows up in `#trades` and the log.
+
+**As built** ([app/tracker.py](../app/tracker.py)): the live app listens to Alpaca's order event stream (restarts itself if it drops). Events are matched to our orders by the entry's client id and the bracket's stop/target order ids (saved when the order is placed):
+- entry filled → `🟢 Bought TSLA: 6 at $365.90 · plan $365.75 (+$0.15 slippage)`; the account books the **real fill** (not the limit)
+- stop / target filled → `❌ Stopped out` / `✅ Target hit` with P&L, R and today's closed P&L; exit slippage recorded
+- entry cancelled with nothing bought → un-counted
+- each message goes to `#trades` **and** as a line under the original alert; each event is handled once; the 3:55 flatten's own sells are booked by flatten.py
+- Tested with fake events (6 cases) and on the real paper stream (a test bracket's 6 events arrived, legs matched)
 
 ### 1b.6 Flatten at 3:55 PM + safety net ✅ *(done before 1b.5: it's what has to exist before ordering is switched on)*
 - 3:55 PM (12:55 PM on early closes): cancel any remaining stop/target orders, sell at market, post the result

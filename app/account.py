@@ -97,6 +97,15 @@ class DayAccount:
                                            round(max_loss, 2), when))
             self._save()
 
+    def update_fill(self, symbol: str, qty: int, price: float) -> None:
+        """The entry filled: use the real fill (price and shares) instead of the limit."""
+        with _lock:
+            for p in self.open_positions:
+                if p.symbol == symbol.upper():
+                    p.qty, p.entry_price, p.cost = int(qty), float(price), round(int(qty) * float(price), 2)
+                    break
+            self._save()
+
     def cancel_entry(self, symbol: str) -> None:
         """An entry that never filled (e.g. the limit wasn't reached): it no longer counts."""
         with _lock:

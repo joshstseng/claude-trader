@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS outcomes (
 
 # columns added after the first version (added to existing databases on open)
 MIGRATIONS = {
+    "orders": [("stop_order_id", "TEXT"), ("target_order_id", "TEXT"), ("entry_slippage", "REAL"),
+               ("exit_slippage", "REAL")],
     "outcomes": [("r_gross", "REAL"), ("cost_usd", "REAL"), ("mfe_r", "REAL"), ("mae_r", "REAL"),
                  ("bars_held", "INTEGER")],
 }
@@ -419,7 +421,8 @@ class TradeLog:
 
     def update_order(self, client_order_id: str, **fields) -> None:
         allowed = {"broker_order_id", "status", "filled_qty", "filled_price", "filled_at", "exit_reason",
-                   "exit_price", "exited_at", "pnl_usd", "note"}
+                   "exit_price", "exited_at", "pnl_usd", "note", "stop_order_id", "target_order_id",
+                   "entry_slippage", "exit_slippage"}
         bad = set(fields) - allowed
         if bad:
             raise ValueError(f"unknown order fields {bad}")
@@ -432,6 +435,15 @@ class TradeLog:
     def order_for_signal(self, signal_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM orders WHERE signal_id = ? ORDER BY id DESC LIMIT 1",
                                (signal_id,)).fetchone()
+
+    def order_by_any_id(self, oid: str) -> tuple[sqlite3.Row, str] | None:
+        """An order row from Alpaca's ids: (row, "entry" | "stop" | "target")."""
+        for col, part in (("client_order_id", "entry"), ("broker_order_id", "entry"),
+                          ("stop_order_id", "stop"), ("target_order_id", "target")):
+            row = self.db.execute(f"SELECT * FROM orders WHERE {col} = ?", (oid,)).fetchone()
+            if row is not None:
+                return row, part
+        return None
 
     def alert_at(self, signal_id: int) -> str | None:
         a = self.alert(signal_id)

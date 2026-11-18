@@ -78,6 +78,37 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
                                        extra=extra))
 
 
+async def track_trades(bot, rules: dict) -> None:
+    """Step 1b.5: Alpaca's live order events (fills, stops, targets) -> the books, #trades and the alert.
+    Restarts the stream if it ever stops."""
+    from alpaca.trading.stream import TradingStream
+    from app.tracker import TradeTracker
+    lg = logging.getLogger("app")
+    al = settings.alpaca_settings()                     # paper only
+    tracker = TradeTracker(tradelog.TradeLog(), rules)
+
+    async def on_update(u) -> None:
+        try:
+            up = await asyncio.to_thread(tracker.handle, u.event, u.order)
+            if up:
+                await bot.post_trades(up.text)
+                await bot.note_on_alert(up.signal_id, up.text)
+        except Exception:  # noqa: BLE001 - one bad event never stops tracking
+            lg.exception("[ORB] couldn't handle a trade update")
+
+    while True:
+        stream = TradingStream(al.api_key, al.secret_key, paper=True)
+        stream.subscribe_trade_updates(on_update)
+        try:
+            await stream._run_forever()
+            lg.warning("[ORB] trade stream ended; restarting in 30 s")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            lg.exception("[ORB] trade stream failed; restarting in 30 s")
+        await asyncio.sleep(30)
+
+
 async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     """The Discord bot and the scheduler, side by side in one loop."""
     from app.discord_bot import DiscordAlerter, DiscordErrorHandler, TraderBot
@@ -129,6 +160,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
+        stream_task = asyncio.create_task(track_trades(bot, rules))
         try:
             done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)
             for t in done:
@@ -141,6 +173,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                 pass
         finally:
             sched.cancel()
+            stream_task.cancel()
 
 
 def single_instance():
