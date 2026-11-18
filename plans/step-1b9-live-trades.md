@@ -1,6 +1,6 @@
 # Step 1b.9: Live trade management in Discord
 
-Part of [ROADMAP.md](../ROADMAP.md), an addition to [Step 1b](step-1b-paper-orders.md). Status: ⬜ Planned (2026-11-18)
+Part of [ROADMAP.md](../ROADMAP.md), an addition to [Step 1b](step-1b-paper-orders.md). Status: ✅ Built 2026-11-18 (1b.9.1–1b.9.7) · first live use after deploy
 
 **Goal:** every open paper trade lives as **one card** in `#live-trades`, kept up to date, with buttons to manage it. When it ends, the card moves to `#closed-trades` as a final record.
 
@@ -84,5 +84,13 @@ Backtest said: ✅ +2.00R          (added after the 4:15 PM step)
 | 1b.9.6 | **Rewire existing messages**: fills, stops, targets, the 3:55 sell, `/flatten` and restart results go to the cards (no more event spam); daily summaries unchanged | `#closed-trades` only has final cards |
 | 1b.9.7 | **After the close**: the 4:15 PM step adds "Backtest said…" to each closed card | Closed cards show live vs backtest |
 
-## Before building
+## As built (2026-11-18)
+- [app/manage.py](../app/manage.py): Cancel, Close now, Break-even, Move stop, Move target with the safety rules; changes on Alpaca's bracket legs (the new leg id is saved so fills still match); every change logged in a new `trade_events` table
+- [app/cards.py](../app/cards.py): the waiting / live / closed card text; [app/livecards.py](../app/livecards.py): posting, ~60 s silent refresh, buttons, the price forms, the two-tap Close, moving finished trades to `#closed-trades` (@mention), card ids saved so restarts resume, and "Backtest said…" added after 4:15
+- On Approve, the `#setups` alert collapses to `⏳ Approved <time> ET → live card` (a link)
+- Fills, stops, targets, the 3:55 sell, `/flatten` and the restart check update the cards instead of posting event messages; summaries of the 3:55 sell go to `#system`
+- **Tested on the real paper account** (1-share F position): stop down refused; stop up and target moved at Alpaca with the new leg ids saved; target below the price refused; Close cancelled both legs and sold, leaving nothing open. Plus 12 automated tests
+- Without `DISCORD_CHANNEL_LIVE_TRADES`, the app falls back to the old behavior
+
+## Setup (done by you 2026-11-18)
 - **You:** rename `#trades` → `#closed-trades`, create **`#live-trades`**, then add `DISCORD_CHANNEL_LIVE_TRADES=<id>` to your local `.env` **and** to Railway's Variables. Suggested notifications: `#live-trades` → Nothing or @mentions only (updates are silent anyway); `#closed-trades` → @mentions.

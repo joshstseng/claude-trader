@@ -106,6 +106,49 @@ class AlpacaPaper:
                         leg.filled_at.isoformat() if leg.filled_at else "")
         return None
 
+    # ------------------------------------------------- managing a trade (1b.9)
+
+    def replace_leg(self, leg_id: str, *, stop_price: float | None = None,
+                    limit_price: float | None = None) -> str:
+        """Change a bracket's stop (stop_price) or target (limit_price) in place. Alpaca gives the
+        changed leg a NEW order id: returned, so fills can still be matched."""
+        from alpaca.trading.requests import ReplaceOrderRequest
+        req = ReplaceOrderRequest(stop_price=round(stop_price, 2) if stop_price is not None else None,
+                                  limit_price=round(limit_price, 2) if limit_price is not None else None)
+        return str(self.trading.replace_order_by_id(leg_id, req).id)
+
+    def close_now(self, symbol: str, leg_ids: list[str], wait_s: float = 8.0) -> str:
+        """Cancel the stop and target, wait until they're gone (they hold the shares), then sell at
+        market. Returns the sell order's id."""
+        import time
+        for lid in leg_ids:
+            try:
+                self.trading.cancel_order_by_id(lid)
+            except Exception:  # noqa: BLE001 - already filled/cancelled
+                pass
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            states = []
+            for lid in leg_ids:
+                try:
+                    states.append(getattr(self.trading.get_order_by_id(lid).status, "value", ""))
+                except Exception:  # noqa: BLE001
+                    states.append("canceled")
+            if all(s in ("canceled", "cancelled", "filled", "expired", "replaced") for s in states):
+                break
+            time.sleep(0.5)
+        return str(self.trading.close_position(symbol).id)
+
+    def price(self, symbol: str) -> float | None:
+        """Alpaca's current price for an open position, else the latest IEX trade."""
+        try:
+            p = self.trading.get_open_position(symbol)
+            if p.current_price:
+                return float(p.current_price)
+        except Exception:  # noqa: BLE001
+            pass
+        return self.last_price(symbol)
+
     def last_price(self, symbol: str) -> float | None:
         """The latest trade (IEX, real-time on the free plan): good enough to see if a price has run."""
         from alpaca.data.enums import DataFeed

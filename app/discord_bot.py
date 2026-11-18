@@ -226,6 +226,19 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
                                                      view=decision_view(self.source, self.signal_id))
             return
         # resolved: the @mention and the card go; an order in flight stays a normal line, the rest collapse
+        if out.placed and out.client_id and bot.cards is not None:
+            # 1b.9: the trade gets its own card in #live-trades; the alert collapses with a link to it
+            card = None
+            try:
+                card = await bot.cards.post(out.client_id)
+            except Exception:  # noqa: BLE001
+                log.exception("[ORB] couldn't post the live card for %s", out.client_id)
+            link = bot.cards.link(out.client_id) if card else None
+            line = stamp("⏳ Approved", now) + (f" → [live card]({link})" if link else "")
+            await interaction.edit_original_response(content=resolved_content(line, "done", original),
+                                                     embeds=[], view=None)
+            bot.follow_entry(interaction.message, out.client_id)
+            return
         await interaction.edit_original_response(
             content=resolved_content(stamp(out.line, now), out.state,
                                      original if out.state == "done" and not out.placed else None),
@@ -329,6 +342,7 @@ class TraderBot(discord.Client):
         self.broker = None          # app.broker.AlpacaPaper (live app only): /positions
         self.assumed_cost = 0.0003  # the backtest's assumed cost per side (for /pnl)
         self._sweeper = None        # expires unanswered alerts in #setups
+        self.cards = None           # app.livecards.LiveCards (live app with #live-trades): trade cards
         self._add_commands()
 
     def trade_log(self, source: str) -> tradelog.TradeLog:
@@ -338,7 +352,8 @@ class TraderBot(discord.Client):
         return self._logs[source]
 
     async def setup_hook(self) -> None:
-        self.add_dynamic_items(DecisionButton)
+        from app.livecards import TradeButton
+        self.add_dynamic_items(DecisionButton, TradeButton)
         guild = discord.Object(id=self.cfg.guild_id)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
@@ -430,6 +445,9 @@ class TraderBot(discord.Client):
             await asyncio.sleep(int((self.desk.o or {}).get("fill_timeout_seconds", 120)))
             try:
                 out = await asyncio.to_thread(self.desk.check_entry, client_id)
+                if self.cards is not None:
+                    await self.cards.sync(client_id)
+                    return
                 if out.line:
                     fresh = await message.channel.fetch_message(message.id)
                     await fresh.edit(content=resolved_content(out.line, out.state), embeds=[], view=None)
@@ -505,13 +523,16 @@ class TraderBot(discord.Client):
             rep = await asyncio.to_thread(self.flattener.flatten, day, "kill switch")
             text = rep.text() if rep.anything else "🛑 **[ORB] /flatten**: nothing was open."
             await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
-            if rep.anything:
-                await self.post_trades(text)
             for sid, line, st in rep.alert_updates:
                 try:
-                    await self.note_on_alert(sid, line, st)
+                    if self.cards is not None:
+                        await self.cards.sync_signal(sid)
+                    else:
+                        await self.note_on_alert(sid, line, st)
                 except Exception:  # noqa: BLE001
-                    log.warning("couldn't update alert %s", sid, exc_info=True)
+                    log.warning("couldn't update trade %s", sid, exc_info=True)
+            if rep.anything and self.cards is None:
+                await self.post_trades(text)
 
         @tree.error
         async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):

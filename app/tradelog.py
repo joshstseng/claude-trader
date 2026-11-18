@@ -115,6 +115,16 @@ CREATE TABLE IF NOT EXISTS orders (
     note             TEXT
 );
 
+CREATE TABLE IF NOT EXISTS trade_events (
+    id               INTEGER PRIMARY KEY,
+    client_order_id  TEXT NOT NULL,
+    at               TEXT NOT NULL,
+    kind             TEXT NOT NULL,          -- stop_moved / target_moved / breakeven / closed_manually / cancelled
+    old_value        REAL,
+    new_value        REAL,
+    note             TEXT
+);
+
 CREATE TABLE IF NOT EXISTS outcomes (
     signal_id    INTEGER PRIMARY KEY REFERENCES signals(id),
     result       TEXT NOT NULL CHECK (result IN ('target', 'stop', 'flat', 'no_data')),
@@ -130,7 +140,8 @@ CREATE TABLE IF NOT EXISTS outcomes (
 # columns added after the first version (added to existing databases on open)
 MIGRATIONS = {
     "orders": [("stop_order_id", "TEXT"), ("target_order_id", "TEXT"), ("entry_slippage", "REAL"),
-               ("exit_slippage", "REAL")],
+               ("exit_slippage", "REAL"), ("live_card_channel_id", "TEXT"), ("live_card_message_id", "TEXT"),
+               ("closed_card_message_id", "TEXT")],
     "outcomes": [("r_gross", "REAL"), ("cost_usd", "REAL"), ("mfe_r", "REAL"), ("mae_r", "REAL"),
                  ("bars_held", "INTEGER")],
 }
@@ -422,7 +433,8 @@ class TradeLog:
     def update_order(self, client_order_id: str, **fields) -> None:
         allowed = {"broker_order_id", "status", "filled_qty", "filled_price", "filled_at", "exit_reason",
                    "exit_price", "exited_at", "pnl_usd", "note", "stop_order_id", "target_order_id",
-                   "entry_slippage", "exit_slippage"}
+                   "entry_slippage", "exit_slippage", "stop", "target", "live_card_channel_id",
+                   "live_card_message_id", "closed_card_message_id"}
         bad = set(fields) - allowed
         if bad:
             raise ValueError(f"unknown order fields {bad}")
@@ -435,6 +447,23 @@ class TradeLog:
     def order_for_signal(self, signal_id: int) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM orders WHERE signal_id = ? ORDER BY id DESC LIMIT 1",
                                (signal_id,)).fetchone()
+
+    def order(self, client_order_id: str) -> sqlite3.Row | None:
+        return self.db.execute("SELECT * FROM orders WHERE client_order_id = ?", (client_order_id,)).fetchone()
+
+    def open_orders(self) -> list[sqlite3.Row]:
+        """Live paper orders that are still waiting to fill or in a trade."""
+        return self.db.execute("SELECT * FROM orders WHERE status IN ('submitted', 'partially_filled', 'filled')"
+                               " ORDER BY id").fetchall()
+
+    def add_event(self, client_order_id: str, kind: str, old=None, new=None, note: str | None = None) -> None:
+        self.db.execute("INSERT INTO trade_events (client_order_id, at, kind, old_value, new_value, note)"
+                        " VALUES (?, ?, ?, ?, ?, ?)", (client_order_id, _now(), kind, old, new, note))
+        self.db.commit()
+
+    def events(self, client_order_id: str) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM trade_events WHERE client_order_id = ? ORDER BY id",
+                               (client_order_id,)).fetchall()
 
     def order_by_any_id(self, oid: str) -> tuple[sqlite3.Row, str] | None:
         """An order row from Alpaca's ids: (row, "entry" | "stop" | "target")."""

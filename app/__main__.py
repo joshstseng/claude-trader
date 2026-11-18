@@ -97,7 +97,9 @@ async def track_trades(bot, rules: dict) -> None:
     async def on_update(u) -> None:
         try:
             up = await asyncio.to_thread(tracker.handle, u.event, u.order)
-            if up:
+            if up and bot.cards is not None:
+                await bot.cards.sync_signal(up.signal_id)     # 1b.9: the trade's card says it all
+            elif up:
                 await bot.post_trades(up.text)
                 await bot.note_on_alert(up.signal_id, up.line, up.state)
         except Exception:  # noqa: BLE001 - one bad event never stops tracking
@@ -131,13 +133,22 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         return
     if rep.anything:
         await bot.post_system(rep.text())
-        for line in rep.trades:
-            await bot.post_trades(f"🔄 {line}")
+        if bot.cards is None:
+            for line in rep.trades:
+                await bot.post_trades(f"🔄 {line}")
     for sid, line, st in rep.alert_updates:
         try:
-            await bot.note_on_alert(sid, line, st)
+            if bot.cards is not None:
+                await bot.cards.sync_signal(sid)
+            else:
+                await bot.note_on_alert(sid, line, st)
         except Exception:  # noqa: BLE001
-            lg.warning("couldn't update alert %s", sid, exc_info=True)
+            lg.warning("couldn't update trade %s", sid, exc_info=True)
+    if bot.cards is not None:
+        try:
+            await bot.cards.ensure_all()          # every open trade has a card (also after a restart)
+        except Exception:  # noqa: BLE001
+            lg.exception("[ORB] couldn't set up live trade cards")
     for cid, wait in rep.recheck:                       # fill checks the restart interrupted
         async def later(cid=cid, wait=wait):
             await asyncio.sleep(max(wait, 0))
@@ -161,6 +172,13 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     bot.desk.pause_source = lambda: state.paused
     bot.flattener = Flattener(broker, tradelog.TradeLog(), rules)            # 3:55 PM and /flatten
     bot.assumed_cost = orb.settings.get("costs", {}).get("pct_per_side", 0.0)   # for /pnl
+    if dcfg.channel_live_trades:                                             # 1b.9: trade cards
+        from app.livecards import LiveCards
+        from app.manage import TradeManager
+        bot.cards = LiveCards(bot, tradelog.TradeLog(), TradeManager(broker, tradelog.TradeLog(), rules), rules,
+                              live_channel=dcfg.channel_live_trades, closed_channel=dcfg.channel_closed_trades,
+                              fill_timeout_s=int(orb.settings.get("orders", {}).get("fill_timeout_seconds", 120)),
+                              session_fn=lambda: state.session)
     loop = asyncio.get_running_loop()
     me = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -186,6 +204,11 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
             await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
                                       run_id=day_bot.run_id,
                                       scanned=day_bot.scanned_today)
+            if bot.cards is not None:
+                try:
+                    await bot.cards.add_backtest_lines(day_bot.day)
+                except Exception:  # noqa: BLE001
+                    logging.getLogger("app").warning("couldn't add backtest lines", exc_info=True)
 
         async def catch_up(day: str, session) -> None:
             await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)
@@ -193,17 +216,22 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         async def flatten(day_bot: OrbDay, phase: str) -> None:
             rep = await asyncio.to_thread(bot.flattener.flatten, day_bot.day, phase)
             if rep.anything:
-                await bot.post_trades(rep.text())
+                await (bot.post_system if bot.cards is not None else bot.post_trades)(rep.text())
             for sid, line, st in rep.alert_updates:
                 try:
-                    await bot.note_on_alert(sid, line, st)
+                    if bot.cards is not None:
+                        await bot.cards.sync_signal(sid)
+                    else:
+                        await bot.note_on_alert(sid, line, st)
                 except Exception:  # noqa: BLE001
-                    logging.getLogger("app").warning("couldn't update alert %s", sid, exc_info=True)
+                    logging.getLogger("app").warning("couldn't update trade %s", sid, exc_info=True)
 
         sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
         stream_task = asyncio.create_task(track_trades(bot, rules))
+        if bot.cards is not None:
+            asyncio.create_task(bot.cards.refresh_loop())
         asyncio.create_task(restart_check(bot, calendar, rules, orb))
         try:
             done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)

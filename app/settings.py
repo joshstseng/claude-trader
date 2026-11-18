@@ -37,6 +37,7 @@ class DiscordSettings:
     channel_closed_trades: int
     channel_daily_summary: int
     channel_system: int
+    channel_live_trades: int | None = None    # Step 1b.9 (optional: without it, no live trade cards)
 
 
 def load_env(env_file: Path = paths.ENV_FILE) -> None:
@@ -91,6 +92,8 @@ def discord_settings() -> DiscordSettings:
         channel_closed_trades=_closed_trades_channel(),
         channel_daily_summary=_require_int("DISCORD_CHANNEL_DAILY_SUMMARY"),
         channel_system=_require_int("DISCORD_CHANNEL_SYSTEM"),
+        channel_live_trades=(_require_int("DISCORD_CHANNEL_LIVE_TRADES")
+                             if os.environ.get("DISCORD_CHANNEL_LIVE_TRADES", "").strip() else None),
     )
 
 
