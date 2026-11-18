@@ -81,7 +81,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 **Gate:** a few weeks of paper trades without errors, with fills, stops, targets and flattens all handled correctly.
 
-**Plan:** [plans/step-1b-paper-orders.md](plans/step-1b-paper-orders.md). Sub-steps 1b.1–1b.8: live data (measure, then choose a free source) → one engine for live and backtest → simulated $5k account + risk state → Approve → order → fills tracking → 3:55 flatten + safety net → restart safety → measured costs.
+**Plan:** [plans/step-1b-paper-orders.md](plans/step-1b-paper-orders.md). **Add-on 1b.9, live trade management** (`#live-trades` cards with Close / Break-even / Move stop / Move target, `#closed-trades`): [plans/step-1b9-live-trades.md](plans/step-1b9-live-trades.md). Sub-steps 1b.1–1b.8: live data (measure, then choose a free source) → one engine for live and backtest → simulated $5k account + risk state → Approve → order → fills tracking → 3:55 flatten + safety net → restart safety → measured costs.
 
 ---
 
@@ -154,6 +154,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Backtests are repeatable and compared; the baseline has no Claude filter, and the filter is tested later |
 | 2026-11-17 | ~~Starts on the Mac; moves to a server by Step 4~~ → **Runs on Railway from Step 1a** (you didn't want to keep the Mac on). Trade log on a Railway volume |
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
+| 2026-11-18 | **Live trade management** in Discord: `#live-trades` (one updating card per trade, buttons; stops only move up) and `#closed-trades` (renamed `#trades`, @mention on close). Resolved alerts in `#setups` collapse to one grey line with an ET timestamp |
 | 2026-11-17 | Step 1b uses **free live data only** (measure Alpaca IEX vs Yahoo first; TradingView CME/COMEX can't be used: futures, no API) and moves the live bot onto the **backtest's engine** |
 | 2026-11-17 | Backtest baseline and Step 1b both use a **cash limit**: the $5k account can't use margin, so usually one ~$3.5k position at a time |
 | 2026-11-17 | Backtest framework started in parallel with the Step 1a live gate (assumed cost 0.03%/side until Step 1b's real fills). Baseline: Nov 2024 → Nov 2026, live v1 settings, cap 5 first come first served; ranking tested later |
