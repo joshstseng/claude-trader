@@ -109,6 +109,31 @@ async def track_trades(bot, rules: dict) -> None:
         await asyncio.sleep(30)
 
 
+async def restart_check(bot, calendar, rules: dict, orb) -> None:
+    """Step 1b.7: on every start, line up the books with Alpaca (fills, exits, waiting entries,
+    anything held while the market is closed)."""
+    from app.reconcile import Reconciler
+    lg = logging.getLogger("app")
+    try:
+        session = await asyncio.to_thread(calendar.session, datetime.now(market.NY).date())
+        rec = Reconciler(bot.broker, tradelog.TradeLog(), rules,
+                         int(orb.settings.get("orders", {}).get("fill_timeout_seconds", 120)))
+        rep = await asyncio.to_thread(rec.reconcile, session)
+    except Exception:  # noqa: BLE001
+        lg.exception("[ORB] restart check failed")
+        return
+    if rep.anything:
+        await bot.post_system(rep.text())
+        for line in rep.trades:
+            await bot.post_trades(f"🔄 {line}")
+    for cid, wait in rep.recheck:                       # fill checks the restart interrupted
+        async def later(cid=cid, wait=wait):
+            await asyncio.sleep(max(wait, 0))
+            out = await asyncio.to_thread(bot.desk.check_entry, cid)
+            await bot.post_trades(out.text)
+        asyncio.create_task(later())
+
+
 async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     """The Discord bot and the scheduler, side by side in one loop."""
     from app.discord_bot import DiscordAlerter, DiscordErrorHandler, TraderBot
@@ -161,6 +186,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
         stream_task = asyncio.create_task(track_trades(bot, rules))
+        asyncio.create_task(restart_check(bot, calendar, rules, orb))
         try:
             done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)
             for t in done:
