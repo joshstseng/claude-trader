@@ -11,7 +11,7 @@ from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 NY = ZoneInfo("America/New_York")
-ICON = {"target": "✅", "stop": "❌", "flat": "➖", "flatten": "🛑", "manual": "✋"}
+ICON = {"target": "✅", "stop": "❌", "flat": "➖", "flatten": "🛑", "manual": ""}   # closed by you: no emoji
 WORD = {"target": "target hit", "stop": "stopped out", "flat": "sold at the close", "flatten": "closed by /flatten",
         "manual": "closed by you"}
 EVENT = {"stop_moved": "stop", "breakeven": "stop → break-even", "target_moved": "target",
@@ -97,7 +97,8 @@ def closed_card(order, signal, events=(), backtest=None) -> tuple[str, str]:
     pnl = order["pnl_usd"] or 0.0
     risk = (signal["entry"] - signal["stop"]) if signal else None
     r = f" · {_r((out_px - fill) / risk)}" if risk and fill is not None and out_px is not None else ""
-    head = f"{ICON.get(reason, '•')} [ORB] {order['symbol']} · {WORD.get(reason, reason)} · **{_signed(pnl)}**{r}"
+    icon = ICON.get(reason, "•")
+    head = f"{icon + ' ' if icon else ''}[ORB] {order['symbol']} · {WORD.get(reason, reason)} · **{_signed(pnl)}**{r}"
     held = ""
     try:
         a = datetime.fromisoformat(str(order["filled_at"]).replace("Z", "+00:00"))

@@ -187,6 +187,13 @@ class TradeTest(unittest.TestCase):
             self.assertLessEqual(len(m.price.placeholder), 100)
             self.assertLessEqual(len(m.title), 45)
 
+    def test_closed_by_you_has_no_emoji(self):
+        self.fill(365.90)
+        self.log.update_order(self.cid, status="closed", exit_reason="manual", exit_price=368.40, pnl_usd=15.0,
+                              exited_at="2026-11-19T16:00:00+00:00")
+        head, _ = cards.closed_card(self.log.order(self.cid), self.log.signal(self.sid))
+        self.assertEqual(head, "[ORB] TSLA · closed by you · **+$15.00** · +0.34R")
+
     def test_button_ids(self):
         m = re.fullmatch(TRADE_RE, f"trade:stop:{self.cid}")
         self.assertEqual((m["action"], m["cid"]), ("stop", self.cid))
