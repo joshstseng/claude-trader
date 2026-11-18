@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅ 1b.4 ✅)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅ 1b.3 ✅ 1b.4 ✅ 1b.6 ✅)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -85,12 +85,17 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1 ✅ 1b.2 ✅
 
 **Done when:** every state change of a paper trade shows up in `#trades` and the log.
 
-### 1b.6 Flatten at 3:55 PM + safety net
+### 1b.6 Flatten at 3:55 PM + safety net ✅ *(done before 1b.5: it's what has to exist before ordering is switched on)*
 - 3:55 PM (12:55 PM on early closes): cancel any remaining stop/target orders, sell at market, post the result
 - **3:58 PM backup** check: anything still open is flattened again, and you're @mentioned in `#system`
 - Discord: **`/positions`** (what's open) and **`/flatten`** (kill switch: close everything now and pause)
 
 **Done when:** a test position left open is closed at 3:55, and the 3:58 backup catches one the first pass missed.
+
+**As built** ([app/flatten.py](../app/flatten.py)): at the flat-by time (3:55, or 12:55 on an early close) the bot cancels every open order and sells every position on the paper account (it's the bot's alone), then books each exit in today's account and the `orders` table: sold now = "flat"; already exited = "stop" / "target" from the bracket's legs (price and time); never filled = cancelled and un-counted. Results go to `#trades`. 3 minutes later a backup pass repeats it; anything still open logs an error, which @mentions you. Also runs immediately if the app starts between 3:55 and the close.
+- **`/positions`**: open positions with unrealized P&L, open orders, and today's simulated account (entries, cash, closed P&L)
+- **`/flatten confirm:yes`**: kill switch: closes everything now and pauses (no alerts or approvals until `/resume`); approvals are refused while paused
+- Tested with a fake Alpaca (sold, stopped earlier, never filled, left open → ping, kill switch, 3:55/3:58 and 12:55/12:58 timing) and the real paper account's position/order calls
 
 ### 1b.7 Restart safety
 - On startup: read open orders and positions from Alpaca and match them to today's signals; resume tracking, never place duplicates

@@ -123,6 +123,13 @@ class OrderDeskTest(unittest.TestCase):
         self.assertIn("risk check: trades: 3 entries placed today", out.text)
         self.assertEqual(self.broker.orders, [])
 
+    def test_paused_bot_refuses_approvals(self):
+        d = self.desk()
+        d.pause_source = lambda: True                              # /pause or /flatten
+        out = d.approve(self.sid)
+        self.assertIn("paused", out.text)
+        self.assertEqual(self.broker.orders, [])
+
     def test_orders_switched_off_only_records(self):
         out = self.desk(enabled=False).approve(self.sid)
         self.assertFalse(out.placed)

@@ -51,6 +51,7 @@ class OrderDesk:
         self.runs_root = runs_root
         self.now = now or (lambda: datetime.now(timezone.utc))
         self._lock = threading.Lock()   # one approval at a time: two quick taps can't race
+        self.pause_source = None        # e.g. the app's /pause and /flatten setting
 
     def approve(self, signal_id: int, user_id=None, *, source: str = "live") -> Outcome:
         with self._lock:
@@ -73,6 +74,8 @@ class OrderDesk:
                                   "alert this would run the stale check, the risk check and send the bracket order.")
         if sig is None:
             return Outcome(False, "⛔ I can't find that signal in the log.")
+        if self.pause_source and self.pause_source():
+            return Outcome(False, "⏸️ **Not placed**: the bot is paused (`/resume` to allow approvals).", final=False)
         if self.log.order_for_signal(signal_id) is not None:
             return Outcome(False, "Already placed: one order per alert.")
         if not self.o.get("enabled", False):

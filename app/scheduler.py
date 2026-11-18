@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 NY = market.NY
 Notify = Callable[[str], Awaitable[None]]
 PREMARKET_TRIES, PREMARKET_RETRY_S = 3, 120
+BACKUP_AFTER_MIN = 3
 
 
 class RealClock:
@@ -60,7 +61,8 @@ async def _say(notify: Notify | None, text: str) -> None:
 async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated: bool,
                   focus: list[str] | None = None, state: AppState | None = None,
                   notify: Notify | None = None,
-                  after_close: Callable[[OrbDay], Awaitable[None]] | None = None) -> None:
+                  after_close: Callable[[OrbDay], Awaitable[None]] | None = None,
+                  flatten: Callable[[OrbDay, str], Awaitable[None]] | None = None) -> None:
     """One trading day. Checks whose time has passed are skipped (a later check catches up).
     If the app starts after the scan window, the focus list isn't built at all."""
     s = day_bot.s
@@ -110,6 +112,17 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
                                        run_id=day_bot.run_id)
         await _say(notify, f"🏁 **[ORB]** scan window closed: {len(sigs)} signals, {sent} alerts today.")
 
+    # out by the close (1b.6): flatten at 3:55 PM (12:55 on an early close), backup check 3 minutes later
+    if flatten is not None and clock.now() < session.at(session.close):
+        from app.afterclose import flat_by_for
+        flat_at = session.at(flat_by_for(session, day_bot.rules))
+        for phase, at in (("flat", flat_at), ("backup", flat_at + timedelta(minutes=BACKUP_AFTER_MIN))):
+            await clock.sleep_until(at)
+            try:
+                await flatten(day_bot, phase)
+            except Exception:  # noqa: BLE001 - logged as an error: pings you
+                log.exception("[ORB] flatten (%s) failed", phase)
+
     close_at = session.at(_hhmm(s["schedule"]["after_close_at"]))
     if session.early_close:
         close_at = session.at(session.close) + timedelta(minutes=15)
@@ -120,7 +133,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
 
 
 async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealClock, *,
-                      state: AppState | None = None, notify: Notify | None = None, after_close=None,
+                      state: AppState | None = None, notify: Notify | None = None, after_close=None, flatten=None,
                       catch_up: Callable[[str, market.Session], Awaitable[None]] | None = None):
     """Live: run every market day, sleep through nights, weekends and holidays.
     `catch_up` runs when the app starts after today's close (e.g. it was down at 4:15 PM), so the
@@ -133,7 +146,7 @@ async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealCl
         if session and now < session.at(session.close):
             day_bot = make_day(now.date().isoformat())
             await run_day(day_bot, session, clock, simulated=False, state=state, notify=notify,
-                          after_close=after_close)
+                          after_close=after_close, flatten=flatten)
         elif session and catch_up:
             try:
                 await catch_up(now.date().isoformat(), session)

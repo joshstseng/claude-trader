@@ -110,7 +110,8 @@ class DayAccount:
                     break
             self._save()
 
-    def record_exit(self, symbol: str, price: float, *, at: datetime | None = None) -> Position:
+    def record_exit(self, symbol: str, price: float, *, at: datetime | None = None,
+                    reason: str | None = None) -> Position:
         """A position closed (stop, target or 3:55 flatten): frees its cash, books its P&L."""
         with _lock:
             p = next((x for x in self.open_positions if x.symbol == symbol.upper()), None)
@@ -120,7 +121,8 @@ class DayAccount:
             p.status, p.exit_price, p.closed_at = "closed", price, when
             p.pnl = round((price - p.entry_price) * p.qty, 2)
             self.records.append({"date": self.day, "at": when, "status": "filled", "kind": "exit",
-                                 "symbol": p.symbol, "side": "sell", "qty": p.qty, "price": price, "pnl": p.pnl})
+                                 "symbol": p.symbol, "side": "sell", "qty": p.qty, "price": price, "pnl": p.pnl,
+                                 "reason": reason})
             self._save()
             return p
 

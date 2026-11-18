@@ -56,6 +56,46 @@ class AlpacaPaper:
     def cancel(self, broker_id: str) -> None:
         self.trading.cancel_order_by_id(broker_id)
 
+    # -------------------------------------------------------- positions (1b.6)
+
+    def positions(self) -> list[dict]:
+        out = []
+        for p in self.trading.get_all_positions():
+            out.append({"symbol": p.symbol, "qty": int(float(p.qty)), "avg_entry": float(p.avg_entry_price),
+                        "price": float(p.current_price) if p.current_price else None,
+                        "unrealized": float(p.unrealized_pl) if p.unrealized_pl else 0.0})
+        return out
+
+    def open_orders(self) -> list[OrderInfo]:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        return [self._info(o) for o in self.trading.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))]
+
+    def close_all(self) -> list[tuple[str, str | None]]:
+        """Cancel every open order and sell every position at market. [(symbol, close order id)]."""
+        out = []
+        for r in self.trading.close_all_positions(cancel_orders=True) or []:
+            body = getattr(r, "body", None)
+            out.append((r.symbol, str(body.id) if getattr(body, "id", None) else None))
+        return out
+
+    def fill_of(self, broker_id: str) -> tuple[str, float | None]:
+        """(status, filled average price) of one order."""
+        o = self.trading.get_order_by_id(broker_id)
+        return getattr(o.status, "value", str(o.status)), (float(o.filled_avg_price) if o.filled_avg_price else None)
+
+    def exit_fill(self, client_id: str) -> tuple[str, float, str] | None:
+        """For a bracket that already exited: ("target" | "stop", price, filled at ISO) from its legs."""
+        from alpaca.trading.requests import GetOrderByIdRequest
+        parent = self.trading.get_order_by_client_id(client_id)
+        o = self.trading.get_order_by_id(str(parent.id), GetOrderByIdRequest(nested=True))
+        for leg in o.legs or []:
+            if getattr(leg.status, "value", str(leg.status)) == "filled" and leg.filled_avg_price:
+                kind = getattr(leg.type, "value", str(leg.type))
+                return ("target" if kind == "limit" else "stop", float(leg.filled_avg_price),
+                        leg.filled_at.isoformat() if leg.filled_at else "")
+        return None
+
     def last_price(self, symbol: str) -> float | None:
         """The latest trade (IEX, real-time on the free plan): good enough to see if a price has run."""
         from alpaca.data.enums import DataFeed

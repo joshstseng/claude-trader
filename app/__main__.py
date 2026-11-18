@@ -85,8 +85,13 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     bot = TraderBot(dcfg, state)
     logging.getLogger().addHandler(DiscordErrorHandler(bot))
     from app.broker import AlpacaPaper
+    from app.flatten import Flattener
     from app.orders import OrderDesk
-    bot.desk = OrderDesk(tradelog.TradeLog(), AlpacaPaper(), orb.settings, rules)   # Approve -> paper order
+    broker = AlpacaPaper()
+    bot.broker = broker
+    bot.desk = OrderDesk(tradelog.TradeLog(), broker, orb.settings, rules)   # Approve -> paper order
+    bot.desk.pause_source = lambda: state.paused
+    bot.flattener = Flattener(broker, tradelog.TradeLog(), rules)            # 3:55 PM and /flatten
     loop = asyncio.get_running_loop()
     me = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -114,9 +119,14 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         async def catch_up(day: str, session) -> None:
             await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)
 
+        async def flatten(day_bot: OrbDay, phase: str) -> None:
+            rep = await asyncio.to_thread(bot.flattener.flatten, day_bot.day, phase)
+            if rep.anything:
+                await bot.post_trades(rep.text())
+
         sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
                                                 notify=bot.post_system, after_close=after_close,
-                                                catch_up=catch_up))
+                                                catch_up=catch_up, flatten=flatten))
         try:
             done, _ = await asyncio.wait({bot_task, sched}, return_when=asyncio.FIRST_EXCEPTION)
             for t in done:

@@ -269,6 +269,8 @@ class TraderBot(discord.Client):
         self.ready = asyncio.Event()
         self._last_error_post = 0.0
         self.desk = None            # app.orders.OrderDesk (live app only): Approve -> paper order
+        self.flattener = None       # app.flatten.Flattener (live app only): /flatten and 3:55 PM
+        self.broker = None          # app.broker.AlpacaPaper (live app only): /positions
         self._add_commands()
 
     def trade_log(self, source: str) -> tradelog.TradeLog:
@@ -299,6 +301,10 @@ class TraderBot(discord.Client):
         await self.ready.wait()
         prefix = f"<@{self.cfg.owner_id}> " if ping else ""
         await self.channel(self.cfg.channel_system).send(prefix + text[:1900])
+
+    async def post_trades(self, text: str) -> None:
+        await self.ready.wait()
+        await self.channel(self.cfg.channel_trades).send(text[:1990])
 
     async def post_daily(self, text: str) -> None:
         await self.ready.wait()
@@ -361,6 +367,33 @@ class TraderBot(discord.Client):
             self.state.paused = False
             await interaction.response.send_message("▶️ Resumed. Alerts are on.")
 
+        @tree.command(name="positions", description="What's open on the paper account right now")
+        @app_commands.check(lambda i: i.user.id == self.cfg.owner_id)
+        async def positions(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            await interaction.followup.send(await asyncio.to_thread(self.positions_text), ephemeral=True)
+
+        @tree.command(name="flatten", description="KILL SWITCH: close every position and order now, then pause")
+        @app_commands.describe(confirm='type "yes" to close everything now')
+        @app_commands.check(lambda i: i.user.id == self.cfg.owner_id)
+        async def flatten(interaction: discord.Interaction, confirm: str):
+            if confirm.strip().lower() != "yes":
+                await interaction.response.send_message('Nothing done. Type `/flatten confirm:yes` to close everything.',
+                                                        ephemeral=True)
+                return
+            self.state.paused = True
+            await interaction.response.defer()
+            if self.flattener is None:
+                await interaction.followup.send("⏸️ Paused. (Ordering isn't set up in this app, so there's nothing to close.)")
+                return
+            from app.market import NY as _NY
+            day = datetime.now(_NY).strftime("%Y-%m-%d")
+            rep = await asyncio.to_thread(self.flattener.flatten, day, "kill switch")
+            text = rep.text() if rep.anything else "🛑 **[ORB] /flatten**: nothing was open."
+            await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
+            if rep.anything:
+                await self.post_trades(text)
+
         @tree.error
         async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
             if isinstance(error, app_commands.CheckFailure):
@@ -368,6 +401,28 @@ class TraderBot(discord.Client):
                                                         ephemeral=True)
             else:
                 log.exception("slash command failed", exc_info=error)
+
+    def positions_text(self) -> str:
+        if self.broker is None:
+            return "Ordering isn't set up in this app."
+        try:
+            pos, orders = self.broker.positions(), self.broker.open_orders()
+        except Exception as e:  # noqa: BLE001
+            return f"⚠️ Couldn't reach Alpaca: {str(e)[:150]}"
+        lines = ["**Paper account**"]
+        if not pos:
+            lines.append("No open positions.")
+        for p in pos:
+            px = f"${p['price']:,.2f}" if p["price"] else "?"
+            lines.append(f"• **{p['symbol']}** {p['qty']} sh · entry ${p['avg_entry']:,.2f} · now {px} · "
+                         f"{'+' if p['unrealized'] >= 0 else '−'}${abs(p['unrealized']):,.2f}")
+        lines.append(f"Open orders: {len(orders)}")
+        if self.state.day:
+            from app.account import DayAccount
+            a = DayAccount.for_day(self.state.day.runs_root, self.state.day.day, self.state.day.rules)
+            lines.append(f"Today (simulated $5k): {a.entries_today} entries · cash ${a.cash:,.2f} · "
+                         f"closed P&L {'+' if a.realized_pnl >= 0 else '−'}${abs(a.realized_pnl):,.2f}")
+        return "\n".join(lines)
 
     def status_text(self) -> str:
         st = self.state
