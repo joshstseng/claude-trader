@@ -42,12 +42,30 @@ class AlpacaPaperGuardTest(unittest.TestCase):
 class DiscordSettingsTest(unittest.TestCase):
     def test_non_numeric_id_is_rejected(self):
         env = {k: "1" for k in ("DISCORD_GUILD_ID", "DISCORD_OWNER_ID", "DISCORD_CHANNEL_SETUPS",
-                                "DISCORD_CHANNEL_TRADES", "DISCORD_CHANNEL_DAILY_SUMMARY",
+                                "DISCORD_CHANNEL_CLOSED_TRADES", "DISCORD_CHANNEL_DAILY_SUMMARY",
                                 "DISCORD_CHANNEL_SYSTEM")}
         env["DISCORD_BOT_TOKEN"] = "t"
         env["DISCORD_OWNER_ID"] = "not-a-number"
         with mock.patch.dict(os.environ, env, clear=True):
             with self.assertRaisesRegex(settings.SettingsError, "DISCORD_OWNER_ID"):
+                settings.discord_settings()
+
+
+class ClosedTradesChannelTest(unittest.TestCase):
+    BASE = {"DISCORD_BOT_TOKEN": "t", "DISCORD_GUILD_ID": "1", "DISCORD_OWNER_ID": "2", "DISCORD_CHANNEL_SETUPS": "3",
+            "DISCORD_CHANNEL_DAILY_SUMMARY": "5", "DISCORD_CHANNEL_SYSTEM": "6"}
+
+    def test_new_name(self):
+        with mock.patch.dict(os.environ, {**self.BASE, "DISCORD_CHANNEL_CLOSED_TRADES": "44"}, clear=True):
+            self.assertEqual(settings.discord_settings().channel_closed_trades, 44)
+
+    def test_old_name_still_works(self):
+        with mock.patch.dict(os.environ, {**self.BASE, "DISCORD_CHANNEL_TRADES": "4"}, clear=True):
+            self.assertEqual(settings.discord_settings().channel_closed_trades, 4)
+
+    def test_missing_names_the_new_variable(self):
+        with mock.patch.dict(os.environ, self.BASE, clear=True):
+            with self.assertRaisesRegex(settings.SettingsError, "DISCORD_CHANNEL_CLOSED_TRADES"):
                 settings.discord_settings()
 
 

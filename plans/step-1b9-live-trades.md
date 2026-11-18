@@ -18,7 +18,7 @@ for you             position, updated, with     finished trade, and an
 
 | Decision | Choice |
 |---|---|
-| Channels | New **`#live-trades`** (`DISCORD_CHANNEL_LIVE_TRADES`). **`#trades` is renamed `#closed-trades`** in Discord (same channel ID, so `DISCORD_CHANNEL_TRADES` keeps working) |
+| Channels | New **`#live-trades`** (`DISCORD_CHANNEL_LIVE_TRADES`). **`#trades` is renamed `#closed-trades`** in Discord (same channel ID); its setting is renamed **`DISCORD_CHANNEL_CLOSED_TRADES`** (the old `DISCORD_CHANNEL_TRADES` still works as a fallback) |
 | `#setups` after Approve | The alert collapses once the order is placed, with a link to its live card: `-# ⏳ Approved 10:36 AM ET → live card` |
 | Card content | Ticker, shares, entry fill and time, **current price**, **unrealized $ and R**, **stop** and **target** with their distance from the price, time left until the 3:55 PM sell, and any changes you made. *No best/worst move.* |
 | Updates | About every minute, and right away on events (fill, stop moved, …) |

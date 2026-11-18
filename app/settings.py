@@ -34,7 +34,7 @@ class DiscordSettings:
     guild_id: int
     owner_id: int
     channel_setups: int
-    channel_trades: int
+    channel_closed_trades: int
     channel_daily_summary: int
     channel_system: int
 
@@ -73,13 +73,22 @@ def alpaca_settings() -> AlpacaSettings:
     )
 
 
+def _closed_trades_channel() -> int:
+    """#closed-trades. DISCORD_CHANNEL_CLOSED_TRADES; the old name DISCORD_CHANNEL_TRADES still works."""
+    if os.environ.get("DISCORD_CHANNEL_CLOSED_TRADES", "").strip():
+        return _require_int("DISCORD_CHANNEL_CLOSED_TRADES")
+    if os.environ.get("DISCORD_CHANNEL_TRADES", "").strip():
+        return _require_int("DISCORD_CHANNEL_TRADES")
+    return _require_int("DISCORD_CHANNEL_CLOSED_TRADES")     # neither set: name the new one in the error
+
+
 def discord_settings() -> DiscordSettings:
     return DiscordSettings(
         bot_token=_require("DISCORD_BOT_TOKEN"),
         guild_id=_require_int("DISCORD_GUILD_ID"),
         owner_id=_require_int("DISCORD_OWNER_ID"),
         channel_setups=_require_int("DISCORD_CHANNEL_SETUPS"),
-        channel_trades=_require_int("DISCORD_CHANNEL_TRADES"),
+        channel_closed_trades=_closed_trades_channel(),
         channel_daily_summary=_require_int("DISCORD_CHANNEL_DAILY_SUMMARY"),
         channel_system=_require_int("DISCORD_CHANNEL_SYSTEM"),
     )

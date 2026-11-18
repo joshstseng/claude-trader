@@ -396,7 +396,7 @@ class TraderBot(discord.Client):
 
     async def post_trades(self, text: str) -> None:
         await self.ready.wait()
-        await self.channel(self.cfg.channel_trades).send(text[:1990])
+        await self.channel(self.cfg.channel_closed_trades).send(text[:1990])
 
     async def note_on_alert(self, signal_id: int, line: str | None, state: str = "live") -> None:
         """Rewrite a live alert as its trade moves on: one normal line while in the trade, one small grey

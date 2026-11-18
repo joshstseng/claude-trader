@@ -48,7 +48,7 @@ async def _discord(cfg: settings.DiscordSettings) -> bool:
             print(f"  OK    in server '{guild.name}'")
             channels = {
                 "DISCORD_CHANNEL_SETUPS": cfg.channel_setups,
-                "DISCORD_CHANNEL_TRADES": cfg.channel_trades,
+                "DISCORD_CHANNEL_CLOSED_TRADES": cfg.channel_closed_trades,
                 "DISCORD_CHANNEL_DAILY_SUMMARY": cfg.channel_daily_summary,
                 "DISCORD_CHANNEL_SYSTEM": cfg.channel_system,
             }

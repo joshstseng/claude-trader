@@ -25,8 +25,8 @@ About 10 minutes. After this the bot runs in the cloud, so your Mac can be off.
 
 ## 4. Paste your variables (~2 min)
 1. Click the service → **Variables** tab → **Raw Editor**.
-2. Open your local `.env` in VS Code, copy **all** of it, and paste it into the Raw Editor. It should have these 11:
-   `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_PAPER` (must be `true`), `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_OWNER_ID`, `DISCORD_CHANNEL_SETUPS`, `DISCORD_CHANNEL_TRADES`, `DISCORD_CHANNEL_DAILY_SUMMARY`, `DISCORD_CHANNEL_SYSTEM`, `SEC_USER_AGENT`
+2. Open your local `.env` in VS Code, copy **all** of it, and paste it into the Raw Editor. It should have these 12:
+   `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_PAPER` (must be `true`), `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_OWNER_ID`, `DISCORD_CHANNEL_SETUPS`, `DISCORD_CHANNEL_CLOSED_TRADES`, `DISCORD_CHANNEL_LIVE_TRADES`, `DISCORD_CHANNEL_DAILY_SUMMARY`, `DISCORD_CHANNEL_SYSTEM`, `SEC_USER_AGENT`
 3. Remove the comment lines (starting with `#`) if Railway complains about them.
 4. Click **Update Variables**. Railway redeploys on its own.
 
