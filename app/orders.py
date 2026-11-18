@@ -34,9 +34,11 @@ LIVE_ORDER_STATES = ("new", "accepted", "pending_new", "accepted_for_bidding", "
 @dataclass
 class Outcome:
     placed: bool
-    text: str                     # one line for the alert
+    text: str                     # the full line (for #trades / logs)
     client_id: str | None = None
     final: bool = True            # no more taps make sense (placed, refused for good)
+    line: str | None = None       # what the alert in #setups becomes (None = leave it as is)
+    state: str = "active"         # active = keep the card · live = one normal line · done = collapse
 
 
 def _money(x: float) -> str:
@@ -71,7 +73,8 @@ class OrderDesk:
             if sig is not None:
                 self.log.record_response(signal_id, "took", user_id=user_id)
             return Outcome(False, "📝 Test/replay alert: approval noted, **no order is placed**. On a live "
-                                  "alert this would run the stale check, the risk check and send the bracket order.")
+                                  "alert this would run the stale check, the risk check and send the bracket order.",
+                           line="📝 Test alert approved (no order placed)", state="done")
         if sig is None:
             return Outcome(False, "⛔ I can't find that signal in the log.")
         if self.pause_source and self.pause_source():
@@ -80,9 +83,11 @@ class OrderDesk:
             return Outcome(False, "Already placed: one order per alert.")
         if not self.o.get("enabled", False):
             self.log.record_response(signal_id, "took", user_id=user_id)
-            return Outcome(False, "📝 Recorded. Ordering is switched off (`orders.enabled`), so nothing was placed.")
+            return Outcome(False, "📝 Recorded. Ordering is switched off (`orders.enabled`), so nothing was placed.",
+                           line="📝 Approved (ordering is off: nothing placed)", state="done")
         if sig["status"] != "pass":
-            return Outcome(False, f"⛔ Not tradable: {sig['status']} ({sig['reason'] or 'no reason'}).")
+            return Outcome(False, f"⛔ Not tradable: {sig['status']} ({sig['reason'] or 'no reason'}).",
+                           line=f"⛔ Not tradable ({sig['status']})", state="done")
 
         sym, entry, stop, target = sig["symbol"], sig["entry"], sig["stop"], sig["target"]
         risk = entry - stop
@@ -135,7 +140,8 @@ class OrderDesk:
                 log.warning("[ORB] order for %s refused by Alpaca: %s", sym, e)
                 self.log.add_order(signal_id, client_id, sym, qty, limit, stop, target, status="rejected")
                 self.log.update_order(client_id, note=str(e)[:300])
-                return Outcome(False, f"⛔ Alpaca refused the order: {str(e)[:150]}")
+                return Outcome(False, f"⛔ Alpaca refused the order: {str(e)[:150]}",
+                               line=f"⛔ Alpaca refused the order ({str(e)[:80]})", state="done")
             info = existing
 
         # 5. bookkeeping
@@ -145,9 +151,11 @@ class OrderDesk:
         self.log.record_response(signal_id, "took", user_id=user_id)
         log.info("[ORB] order placed: buy %d %s limit %.2f stop %.2f target %.2f (%s)", qty, sym, limit, stop,
                  target, client_id)
+        line = (f"⏳ **[ORB] {sym}** · order sent: buy {qty} at limit {_money(limit)} · stop {_money(stop)} · "
+                f"target {_money(target)}")
         return Outcome(True, f"⏳ **Order sent** (paper): buy {qty} {sym} limit {_money(limit)} · "
                              f"stop {_money(stop)} · target {_money(target)} · max loss {_money(sizing['max_loss'])}",
-                       client_id)
+                       client_id, line=line, state="live")
 
     def _check_entry(self, client_id: str) -> Outcome:
         """After the fill timeout: filled → keep; still waiting → cancel and un-count it."""
@@ -165,14 +173,19 @@ class OrderDesk:
                 DayAccount.for_day(self.runs_root, sig["date"], self.rules).update_fill(
                     row["symbol"], info.filled_qty, info.filled_price)
             slip = (info.filled_price or 0) - (row["limit_price"] or 0)
+            in_trade = (f"🟢 **[ORB] {row['symbol']}** · in trade: {info.filled_qty} @ {_money(info.filled_price)} · "
+                        f"stop {_money(row['stop'])} · target {_money(row['target'])}")
             return Outcome(True, f"✅ **Filled** {info.filled_qty} {row['symbol']} at {_money(info.filled_price)} "
                                  f"({'−' if slip < 0 else '+'}{_money(abs(slip))} vs the limit). "
-                                 f"Stop and target are live at Alpaca.", client_id)
+                                 f"Stop and target are live at Alpaca.", client_id, line=in_trade, state="live")
         if info.status == "partially_filled":
             self.log.update_order(client_id, status="partially_filled", filled_qty=info.filled_qty,
                                   filled_price=info.filled_price)
             return Outcome(True, f"◐ Partly filled: {info.filled_qty} of {row['qty']} {row['symbol']} at "
-                                 f"{_money(info.filled_price)}. Tracking continues.", client_id)
+                                 f"{_money(info.filled_price)}. Tracking continues.", client_id,
+                           line=(f"◐ **[ORB] {row['symbol']}** · partly filled {info.filled_qty}/{row['qty']} @ "
+                                 f"{_money(info.filled_price)} · stop {_money(row['stop'])} · target {_money(row['target'])}"),
+                           state="live")
         if info.status in LIVE_ORDER_STATES:
             try:
                 self.broker.cancel(info.broker_id)
@@ -183,7 +196,9 @@ class OrderDesk:
             DayAccount.for_day(self.runs_root, sig["date"], self.rules).cancel_entry(row["symbol"])
             self.log.update_order(client_id, status="cancelled", note="not filled within the timeout")
             return Outcome(False, f"⌛ **Not filled** within {self.o.get('fill_timeout_seconds', 120)}s at the "
-                                  f"{_money(row['limit_price'])} limit: cancelled, nothing bought.", client_id)
+                                  f"{_money(row['limit_price'])} limit: cancelled, nothing bought.", client_id,
+                           line=f"⌛ [ORB] {row['symbol']} · limit {_money(row['limit_price'])} never filled, nothing bought",
+                           state="done")
         self.log.update_order(client_id, status=info.status)
         if info.status in ("canceled", "cancelled", "expired", "rejected"):
             sig = self.log.signal(row["signal_id"])
@@ -192,4 +207,5 @@ class OrderDesk:
 
     def _refuse(self, signal_id: int, why: str, final: bool = True) -> Outcome:
         log.info("[ORB] approval refused for signal %s: %s", signal_id, why)
-        return Outcome(False, f"⛔ **Not placed**: {why}.", final=final)
+        return Outcome(False, f"⛔ **Not placed**: {why}.", final=final,
+                       line=f"⛔ Not placed ({why})" if final else None, state="done" if final else "active")

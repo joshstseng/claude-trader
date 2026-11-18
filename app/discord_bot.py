@@ -15,7 +15,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import discord
@@ -198,30 +198,37 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
             return
         # replay / test alerts may have been posted from another machine: they work without a log row
         embed = interaction.message.embeds[0] if interaction.message and interaction.message.embeds else None
+        original = interaction.message.content if interaction.message else ""
         now = datetime.now().astimezone()
-        if self.action != "approve":                     # Skip (or an old "Took it"): just record it
+        if self.action != "approve":                     # Skip (or an old "Took it"): record it, collapse
             if known:
                 trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
-            view = decision_view(self.source, self.signal_id, chosen=self.action, kind=self._kind(interaction))
+            label = "⏭️ Skipped" if self.action == "skip" else "📝 Took it"
             await interaction.response.edit_message(
-                embed=with_response(embed, self.action, now) if embed else discord.utils.MISSING, view=view)
+                content=resolved_content(f"{label} {now:%-I:%M %p}", "done", original), embeds=[], view=None)
             return
 
         await interaction.response.defer()               # placing an order can take a few seconds
         if bot.desk is None:
-            trade_log.record_response(self.signal_id, "took", user_id=interaction.user.id)
+            if known:
+                trade_log.record_response(self.signal_id, "took", user_id=interaction.user.id)
             from app.orders import Outcome
-            out = Outcome(False, "📝 Recorded. Ordering isn't set up in this app, so nothing was placed.")
+            out = Outcome(False, "📝 Recorded. Ordering isn't set up in this app, so nothing was placed.",
+                          line="📝 Approved (ordering isn't set up: nothing placed)", state="done")
         else:
             out = await asyncio.to_thread(bot.desk.approve, self.signal_id, interaction.user.id,
                                           source=self.source)
-        if embed:
-            embed = with_order_line(with_response(embed, "approve", now), out.text)
-        locked = out.placed or out.final
+        if out.state == "active" or not out.line:
+            # not resolved (e.g. paused, no fresh price): keep the card and say why under it
+            if embed:
+                embed = with_order_line(with_response(embed, "approve", now), out.text)
+            await interaction.edit_original_response(embed=embed or discord.utils.MISSING,
+                                                     view=decision_view(self.source, self.signal_id))
+            return
+        # resolved: the @mention and the card go; an order in flight stays a normal line, the rest collapse
         await interaction.edit_original_response(
-            embed=embed or discord.utils.MISSING,
-            view=decision_view(self.source, self.signal_id, chosen="approve" if out.placed else None,
-                               locked=locked))
+            content=resolved_content(out.line, out.state, original if out.state == "done" and not out.placed else None),
+            embeds=[], view=None)
         if out.placed and out.client_id:
             bot.follow_entry(interaction.message, out.client_id)
 
@@ -250,6 +257,44 @@ def with_order_line(embed: discord.Embed, text: str) -> discord.Embed:
     return em
 
 
+MENTION_RE = re.compile(r"^\s*<@!?\d+>\s*")
+
+
+def alert_title(content: str) -> str:
+    """'<@1> REPLAY · **[ORB] TSLA** breakout · buy $X · …' -> 'REPLAY · [ORB] TSLA breakout · buy $X · …'
+    (no @mention, no bold)."""
+    return MENTION_RE.sub("", content or "").replace("**", "").strip()
+
+
+def resolved_content(line: str, state: str, original: str | None = None) -> str:
+    """What a resolved alert becomes. live = one normal line (an open trade); done = one small grey
+    line (finished). `original` (the alert's first line) adds which alert it was, when the line doesn't say."""
+    title = alert_title(original) if original else ""
+    text = f"{line} · {title}" if title else line
+    if state == "done":
+        return ("-# " + text.replace("**", ""))[:1990]
+    return text[:1990]
+
+
+def is_active_alert(msg: discord.Message) -> bool:
+    """Still waiting on you: it has buttons that can be pressed."""
+    for row in msg.components or []:
+        for c in getattr(row, "children", []):
+            if getattr(c, "custom_id", "") and str(c.custom_id).startswith("orb:") and not getattr(c, "disabled", False):
+                return True
+    return False
+
+
+def chosen_on_old_alert(msg: discord.Message) -> str | None:
+    """Alerts from before this change locked their buttons with a ✓ on the one you tapped."""
+    for row in msg.components or []:
+        for c in getattr(row, "children", []):
+            label = getattr(c, "label", "") or ""
+            if label.startswith("✓"):
+                return label[1:].strip()
+    return None
+
+
 async def owner_only(interaction: discord.Interaction) -> bool:
     bot: TraderBot = interaction.client  # type: ignore[assignment]
     if interaction.user.id == bot.cfg.owner_id:
@@ -272,6 +317,7 @@ class TraderBot(discord.Client):
         self.flattener = None       # app.flatten.Flattener (live app only): /flatten and 3:55 PM
         self.broker = None          # app.broker.AlpacaPaper (live app only): /positions
         self.assumed_cost = 0.0003  # the backtest's assumed cost per side (for /pnl)
+        self._sweeper = None        # expires unanswered alerts in #setups
         self._add_commands()
 
     def trade_log(self, source: str) -> tradelog.TradeLog:
@@ -289,6 +335,40 @@ class TraderBot(discord.Client):
     async def on_ready(self) -> None:
         log.info("Discord: logged in as %s", self.user)
         self.ready.set()
+        if self._sweeper is None:
+            self._sweeper = asyncio.create_task(self._expire_alerts())
+
+    async def _expire_alerts(self) -> None:
+        """Every 30 s: an alert nobody answered within the stale limit (5 min) collapses to
+        "⌛ Expired": by then Approve would be refused anyway. Alerts from before collapses existed
+        (buttons locked with a ✓) are tidied the same way."""
+        while True:
+            try:
+                await self.sweep_setups()
+            except Exception:  # noqa: BLE001 - a hiccup here must never stop the bot
+                log.warning("[ORB] alert sweep failed", exc_info=True)
+            await asyncio.sleep(30)
+
+    async def sweep_setups(self) -> int:
+        stale_min = int(((self.desk.o if self.desk else {}) or {}).get("stale_minutes", 5))
+        ch = self.get_channel(self.cfg.channel_setups)
+        if ch is None:
+            return 0
+        now, n = datetime.now(timezone.utc), 0
+        async for msg in ch.history(limit=40):
+            if msg.author != self.user or not msg.components:
+                continue
+            old_choice = chosen_on_old_alert(msg)
+            if old_choice:
+                status = {"Skipped": "⏭️ Skipped", "Approved": "✓ Approved", "Took it": "📝 Took it"}.get(
+                    old_choice, old_choice)
+                await msg.edit(content=resolved_content(status, "done", msg.content), embeds=[], view=None)
+                n += 1
+            elif is_active_alert(msg) and (now - msg.created_at).total_seconds() > stale_min * 60:
+                await msg.edit(content=resolved_content(f"⌛ Expired (no answer in {stale_min} min)", "done",
+                                                        msg.content), embeds=[], view=None)
+                n += 1
+        return n
 
     # ---- posting
 
@@ -307,8 +387,11 @@ class TraderBot(discord.Client):
         await self.ready.wait()
         await self.channel(self.cfg.channel_trades).send(text[:1990])
 
-    async def note_on_alert(self, signal_id: int, text: str) -> None:
-        """Add a status line under a live alert (e.g. bought, stopped out)."""
+    async def note_on_alert(self, signal_id: int, line: str | None, state: str = "live") -> None:
+        """Rewrite a live alert as its trade moves on: one normal line while in the trade, one small grey
+        line when it's finished (bought, stopped out, target hit, sold at the close…)."""
+        if not line:
+            return
         a = self.trade_log("live").alert(signal_id)
         if not a or not a["message_id"] or not a["channel_id"]:
             return
@@ -316,8 +399,7 @@ class TraderBot(discord.Client):
         if ch is None:
             return
         msg = await ch.fetch_message(int(a["message_id"]))
-        if msg.embeds:
-            await msg.edit(embed=with_order_line(msg.embeds[0], text))
+        await msg.edit(content=resolved_content(line, state), embeds=[], view=None)
 
     async def post_daily(self, text: str) -> None:
         await self.ready.wait()
@@ -337,9 +419,9 @@ class TraderBot(discord.Client):
             await asyncio.sleep(int((self.desk.o or {}).get("fill_timeout_seconds", 120)))
             try:
                 out = await asyncio.to_thread(self.desk.check_entry, client_id)
-                fresh = await message.channel.fetch_message(message.id)
-                if fresh.embeds:
-                    await fresh.edit(embed=with_order_line(fresh.embeds[0], out.text))
+                if out.line:
+                    fresh = await message.channel.fetch_message(message.id)
+                    await fresh.edit(content=resolved_content(out.line, out.state), embeds=[], view=None)
             except Exception:  # noqa: BLE001
                 log.exception("[ORB] follow-up for %s failed", client_id)
         asyncio.create_task(follow())
@@ -414,6 +496,11 @@ class TraderBot(discord.Client):
             await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
             if rep.anything:
                 await self.post_trades(text)
+            for sid, line, st in rep.alert_updates:
+                try:
+                    await self.note_on_alert(sid, line, st)
+                except Exception:  # noqa: BLE001
+                    log.warning("couldn't update alert %s", sid, exc_info=True)
 
         @tree.error
         async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):

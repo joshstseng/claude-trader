@@ -39,6 +39,7 @@ class ReconcileReport:
     trades: list[str] = field(default_factory=list)           # for #trades
     problems: list[str] = field(default_factory=list)         # ping-worthy
     recheck: list[tuple[str, float]] = field(default_factory=list)   # (client id, seconds until its fill check)
+    alert_updates: list[tuple] = field(default_factory=list)          # (signal id, line, "live"|"done")
 
     @property
     def anything(self) -> bool:
@@ -78,6 +79,9 @@ class Reconciler:
                 if info.filled_price and info.filled_qty:
                     acct.update_fill(sym, info.filled_qty, info.filled_price)
                 rep.notes.append(f"{sym}: entry filled while I was away ({info.filled_qty} at ${info.filled_price:,.2f})")
+                rep.alert_updates.append((row["signal_id"], f"🟢 **[ORB] {sym}** · in trade: {info.filled_qty} @ "
+                                          f"${info.filled_price:,.2f} · stop ${row['stop']:,.2f} · target "
+                                          f"${row['target']:,.2f}", "live"))
             elif info.status in WAITING:
                 age = (now - datetime.fromisoformat(row["submitted_at"])).total_seconds()
                 if age >= self.timeout:
@@ -85,12 +89,16 @@ class Reconciler:
                     acct.cancel_entry(sym)
                     self.log.update_order(cid, status="cancelled", note="not filled in time (found on restart)")
                     rep.notes.append(f"{sym}: entry never filled, cancelled")
+                    rep.alert_updates.append((row["signal_id"], f"⌛ [ORB] {sym} · limit never filled, nothing bought",
+                                              "done"))
                 else:
                     rep.recheck.append((cid, self.timeout - age))
             elif info.status in ("canceled", "cancelled", "expired", "rejected") and info.filled_qty == 0:
                 acct.cancel_entry(sym)
                 self.log.update_order(cid, status="cancelled", note=f"entry {info.status} while I was away")
                 rep.notes.append(f"{sym}: entry {info.status} while I was away, nothing bought")
+                rep.alert_updates.append((row["signal_id"], f"⌛ [ORB] {sym} · entry {info.status}, nothing bought",
+                                          "done"))
 
         # 2. positions: ours vs Alpaca's
         held = {p["symbol"]: p["qty"] for p in self.broker.positions()}
@@ -115,6 +123,9 @@ class Reconciler:
             icon = "✅ Target hit" if reason == "target" else "❌ Stopped out"
             rep.trades.append(f"{icon} {pos.symbol} while I was away: {closed.qty} at ${price:,.2f} "
                               f"({'+' if closed.pnl >= 0 else '−'}${abs(closed.pnl):,.2f})")
+            rep.alert_updates.append((pos.signal_id, f"{'✅' if reason == 'target' else '❌'} [ORB] {pos.symbol} · "
+                                      f"{'target hit' if reason == 'target' else 'stopped out'} at ${price:,.2f} · "
+                                      f"{'+' if closed.pnl >= 0 else '−'}${abs(closed.pnl):,.2f}", "done"))
         ours = {p.symbol for p in acct.open_positions}
         for sym in sorted(set(held) - ours):
             rep.problems.append(f"{sym}: Alpaca holds {held[sym]} shares that aren't in today's books")

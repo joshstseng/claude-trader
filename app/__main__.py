@@ -99,7 +99,7 @@ async def track_trades(bot, rules: dict) -> None:
             up = await asyncio.to_thread(tracker.handle, u.event, u.order)
             if up:
                 await bot.post_trades(up.text)
-                await bot.note_on_alert(up.signal_id, up.text)
+                await bot.note_on_alert(up.signal_id, up.line, up.state)
         except Exception:  # noqa: BLE001 - one bad event never stops tracking
             lg.exception("[ORB] couldn't handle a trade update")
 
@@ -133,6 +133,11 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         await bot.post_system(rep.text())
         for line in rep.trades:
             await bot.post_trades(f"🔄 {line}")
+    for sid, line, st in rep.alert_updates:
+        try:
+            await bot.note_on_alert(sid, line, st)
+        except Exception:  # noqa: BLE001
+            lg.warning("couldn't update alert %s", sid, exc_info=True)
     for cid, wait in rep.recheck:                       # fill checks the restart interrupted
         async def later(cid=cid, wait=wait):
             await asyncio.sleep(max(wait, 0))
@@ -189,6 +194,11 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
             rep = await asyncio.to_thread(bot.flattener.flatten, day_bot.day, phase)
             if rep.anything:
                 await bot.post_trades(rep.text())
+            for sid, line, st in rep.alert_updates:
+                try:
+                    await bot.note_on_alert(sid, line, st)
+                except Exception:  # noqa: BLE001
+                    logging.getLogger("app").warning("couldn't update alert %s", sid, exc_info=True)
 
         sched = asyncio.create_task(run_forever(make, calendar, RealClock(), state=state,
                                                 notify=bot.post_system, after_close=after_close,

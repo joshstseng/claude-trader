@@ -141,3 +141,39 @@ class PauseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResolvedAlertTest(unittest.TestCase):
+    """#setups: an alert stays a full card only while it needs you; then it collapses."""
+    ORIGINAL = "<@123456789> REPLAY · **[ORB] TSLA** breakout · buy $365.75 · stop $358.32 · target $380.61"
+
+    def test_title_drops_the_mention_and_bold(self):
+        self.assertEqual(discord_bot.alert_title(self.ORIGINAL),
+                         "REPLAY · [ORB] TSLA breakout · buy $365.75 · stop $358.32 · target $380.61")
+
+    def test_skipped_collapses_to_one_small_line_without_the_mention(self):
+        c = discord_bot.resolved_content("⏭️ Skipped 10:37 AM", "done", self.ORIGINAL)
+        self.assertEqual(c, "-# ⏭️ Skipped 10:37 AM · REPLAY · [ORB] TSLA breakout · buy $365.75 · "
+                            "stop $358.32 · target $380.61")
+        self.assertNotIn("<@", c)
+
+    def test_open_trade_stays_a_normal_line(self):
+        c = discord_bot.resolved_content("🟢 **[ORB] TSLA** · in trade: 6 @ $365.90", "live")
+        self.assertEqual(c, "🟢 **[ORB] TSLA** · in trade: 6 @ $365.90")
+
+    def test_finished_trade_collapses(self):
+        c = discord_bot.resolved_content("✅ [ORB] TSLA · target hit at $380.61 · +$87.66 · +1.97R", "done")
+        self.assertTrue(c.startswith("-# ✅ [ORB] TSLA · target hit"))
+
+    def _msg(self, *buttons):
+        from types import SimpleNamespace as NS
+        return NS(components=[NS(children=[NS(custom_id=cid, disabled=dis, label=label)
+                                           for cid, dis, label in buttons])])
+
+    def test_active_vs_old_locked_alerts(self):
+        active = self._msg(("orb:approve:live:1", False, "Approve"), ("orb:skip:live:1", False, "Skip"))
+        locked = self._msg(("orb:approve:live:2", True, "✓ Approved"), ("orb:skip:live:2", True, "Skip"))
+        self.assertTrue(discord_bot.is_active_alert(active))
+        self.assertFalse(discord_bot.is_active_alert(locked))
+        self.assertIsNone(discord_bot.chosen_on_old_alert(active))
+        self.assertEqual(discord_bot.chosen_on_old_alert(locked), "Approved")

@@ -48,6 +48,8 @@ class TrackerTest(unittest.TestCase):
                                  "stop $358.32 · target $380.61")
         row = self.log.order_for_signal(self.sid)
         self.assertEqual((row["status"], row["filled_price"], row["entry_slippage"]), ("filled", 365.9, 0.15))
+        self.assertEqual((u.state, u.line), ("live", "🟢 **[ORB] TSLA** · in trade: 6 @ $365.90 · stop $358.32 · "
+                                                     "target $380.61"))
         self.assertIsNone(self.t.handle("fill", self.order("B1", self.cid, price="365.90")))   # once only
 
     def test_stopped_out(self):
@@ -56,6 +58,7 @@ class TrackerTest(unittest.TestCase):
         # P&L from the real fill (365.90), not the limit: (358.20 - 365.90) x 6 = -46.20; -7.70 / 7.43 risk
         self.assertIn("❌ **[ORB] Stopped out** TSLA: sold 6 at $358.20 (stop $358.32) · **−$46.20**", u.text)
         self.assertIn("−1.04R", u.text)
+        self.assertEqual((u.state, u.line), ("done", "❌ [ORB] TSLA · stopped out at $358.20 · −$46.20 · −1.04R"))
         a = self.acct()
         self.assertEqual((a.open_positions, a.realized_pnl, a.cash), ([], -46.2, 5000.0))
         row = self.log.order_for_signal(self.sid)

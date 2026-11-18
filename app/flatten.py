@@ -37,6 +37,7 @@ class FlattenReport:
     cancelled_entries: list[str] = field(default_factory=list)
     still_open: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    alert_updates: list[tuple] = field(default_factory=list)  # (signal id, line, "done") for #setups
 
     @property
     def anything(self) -> bool:
@@ -93,6 +94,8 @@ class Flattener:
                     self.log.update_order(order["client_order_id"], status="cancelled",
                                           note=f"cancelled at the {phase}")
                     rep.cancelled_entries.append(pos.symbol)
+                    rep.alert_updates.append((pos.signal_id, f"⌛ [ORB] {pos.symbol} · entry cancelled at the "
+                                                             f"{phase}, nothing bought", "done"))
                     continue
             if reason is None:
                 rep.problems.append(f"{pos.symbol}: can't tell how it closed; check Alpaca")
@@ -106,6 +109,11 @@ class Flattener:
                                       exit_price=price, exited_at=when or self.now().isoformat(timespec="seconds"),
                                       pnl_usd=closed.pnl)
             rep.exits.append((pos.symbol, pos.qty, reason, price, closed.pnl))
+            words = {"flat": "sold at the close", "flatten": "closed by /flatten", "stop": "stopped out",
+                     "target": "target hit"}.get(reason, reason)
+            pnl = closed.pnl or 0
+            rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} [ORB] {pos.symbol} · {words} at "
+                                                     f"${price:,.2f} · {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f}", "done"))
 
         # anything Alpaca still holds (or still has orders for) after all that
         try:

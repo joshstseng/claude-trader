@@ -89,6 +89,8 @@ class FlattenTest(unittest.TestCase):
         self.assertEqual((row["status"], row["exit_reason"], row["exit_price"], row["pnl_usd"]),
                          ("closed", "flat", 367.24, 8.94))
         self.assertIn("➖ TSLA: 6 sh, flat at $367.24 (+$8.94)", rep.text())
+        sid = self.log.order_for_signal(1)["signal_id"]
+        self.assertEqual(rep.alert_updates, [(sid, "➖ [ORB] TSLA · sold at the close at $367.24 · +$8.94", "done")])
 
     def test_a_trade_stopped_out_earlier_is_booked_from_its_legs(self):
         cid = self.trade("NVDA", 10, 180.0)

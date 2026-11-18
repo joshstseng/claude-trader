@@ -86,6 +86,8 @@ class OrderDeskTest(unittest.TestCase):
                          ("TSLA", 364.54, 358.32, 375.90, 8))
         self.assertEqual(o["client_id"], f"orb-2026-10-19-{self.sid}")
         self.assertIn("Order sent", out.text)
+        self.assertEqual((out.state, out.line), ("live", "⏳ **[ORB] TSLA** · order sent: buy 8 at limit $364.54 · "
+                                                         "stop $358.32 · target $375.90"))
         acct = DayAccount.for_day(self.root / "runs", "2026-10-19", self.rules)
         self.assertEqual(acct.entries_today, 1)                   # counts from the moment it's placed
         self.assertEqual(self.log.order_for_signal(self.sid)["status"], "submitted")
@@ -102,6 +104,8 @@ class OrderDeskTest(unittest.TestCase):
         out = self.desk(minutes_after=7).approve(self.sid)
         self.assertFalse(out.placed)
         self.assertIn("stale: the alert is 7 minutes old", out.text)
+        self.assertEqual(out.state, "done")
+        self.assertTrue(out.line.startswith("⛔ Not placed (stale"))
         self.assertEqual(self.broker.orders, [])
 
     def test_stale_by_price(self):
@@ -128,6 +132,7 @@ class OrderDeskTest(unittest.TestCase):
         d.pause_source = lambda: True                              # /pause or /flatten
         out = d.approve(self.sid)
         self.assertIn("paused", out.text)
+        self.assertEqual(out.state, "active")                      # the card stays: /resume and tap again
         self.assertEqual(self.broker.orders, [])
 
     def test_orders_switched_off_only_records(self):

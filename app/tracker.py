@@ -39,7 +39,9 @@ def _signed(x: float) -> str:
 @dataclass
 class Update:
     signal_id: int
-    text: str          # for #trades and under the alert
+    text: str                  # for #trades
+    line: str | None = None    # what the alert in #setups becomes
+    state: str = "live"        # live = one normal line (in a trade) · done = collapsed (finished)
 
 
 class TradeTracker:
@@ -80,10 +82,14 @@ class TradeTracker:
             return Update(row["signal_id"],
                           f"🟢 **[ORB] Bought {sym}**: {qty} at {_money(price)} · plan {_money(sig['entry'])} "
                           f"({_signed(slip or 0)} a share slippage) · stop {_money(row['stop'])} · "
-                          f"target {_money(row['target'])}")
+                          f"target {_money(row['target'])}",
+                          line=(f"🟢 **[ORB] {sym}** · in trade: {qty} @ {_money(price)} · stop {_money(row['stop'])}"
+                                f" · target {_money(row['target'])}"), state="live")
         if event == "partial_fill":
             self.log.update_order(cid, status="partially_filled", filled_qty=qty, filled_price=price)
-            return Update(row["signal_id"], f"◐ **[ORB] {sym}** partly filled: {qty} of {row['qty']} at {_money(price)}")
+            return Update(row["signal_id"], f"◐ **[ORB] {sym}** partly filled: {qty} of {row['qty']} at {_money(price)}",
+                          line=(f"◐ **[ORB] {sym}** · partly filled {qty}/{row['qty']} @ {_money(price)} · "
+                                f"stop {_money(row['stop'])} · target {_money(row['target'])}"), state="live")
         if event in ("canceled", "expired", "rejected"):
             if row["status"] in FINAL:
                 return None
@@ -92,7 +98,8 @@ class TradeTracker:
             self.log.update_order(cid, status="cancelled" if event != "rejected" else "rejected",
                                   note=f"entry {event}")
             if qty == 0:
-                return Update(row["signal_id"], f"⌛ **[ORB] {sym}** entry {event}: nothing bought")
+                return Update(row["signal_id"], f"⌛ **[ORB] {sym}** entry {event}: nothing bought",
+                              line=f"⌛ [ORB] {sym} · entry {event}, nothing bought", state="done")
         return None
 
     # ------------------------------------------------------------------ exits
@@ -115,6 +122,11 @@ class TradeTracker:
                               exited_at=str(order.filled_at or ""), pnl_usd=closed.pnl,
                               exit_slippage=round(price - planned, 4))
         head = "✅ **[ORB] Target hit**" if part == "target" else "❌ **[ORB] Stopped out**"
+        word = "target hit" if part == "target" else "stopped out"
+        icon = "✅" if part == "target" else "❌"
+        line = (f"{icon} [ORB] {sym} · {word} at {_money(price)} · {_signed(closed.pnl)} · "
+                f"{r:+.2f}R").replace("-", "−")
         return Update(row["signal_id"],
                       f"{head} {sym}: sold {closed.qty} at {_money(price)} ({part} {_money(planned)}) · "
-                      f"**{_signed(closed.pnl)}** · {r:+.2f}R · today's closed P&L {_signed(acct.realized_pnl)}".replace("-", "−"))
+                      f"**{_signed(closed.pnl)}** · {r:+.2f}R · today's closed P&L {_signed(acct.realized_pnl)}".replace("-", "−"),
+                      line=line, state="done")
