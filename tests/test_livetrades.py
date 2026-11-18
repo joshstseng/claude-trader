@@ -160,6 +160,18 @@ class TradeTest(unittest.TestCase):
         self.assertIn("In $365.90 (10:36 AM) → out $380.61 (1:12 PM) · 6 sh · held 2h 36m", body)
         self.assertIn("Backtest said: ✅ +2.00R", body)
 
+    def test_price_forms_fit_discords_limits(self):
+        """Discord refuses a form whose label is over 45 characters ("didn't respond in time")."""
+        import asyncio
+        from app.livecards import PriceModal
+
+        async def build():
+            return [PriceModal(None, self.cid, k, "GOOGL", 1234.56) for k in ("stop", "target")]
+        for m in asyncio.run(build()):
+            self.assertLessEqual(len(m.price.label), 45)
+            self.assertLessEqual(len(m.price.placeholder), 100)
+            self.assertLessEqual(len(m.title), 45)
+
     def test_button_ids(self):
         m = re.fullmatch(TRADE_RE, f"trade:stop:{self.cid}")
         self.assertEqual((m["action"], m["cid"]), ("stop", self.cid))

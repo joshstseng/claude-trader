@@ -52,6 +52,17 @@ class TradeButton(discord.ui.DynamicItem[discord.ui.Button], template=TRADE_RE):
         return await owner_only(interaction)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        try:
+            await self._handle(interaction)
+        except Exception as e:  # noqa: BLE001 - say what went wrong instead of "didn't respond"
+            log.exception("[ORB] trade button %s failed", self.action)
+            msg = f"⚠️ That didn't work: {str(e)[:150]}"
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+
+    async def _handle(self, interaction: discord.Interaction) -> None:
         lc: LiveCards | None = getattr(interaction.client, "cards", None)
         if lc is None:
             await interaction.response.send_message("Trade management isn't set up in this app.", ephemeral=True)
@@ -97,9 +108,10 @@ class PriceModal(discord.ui.Modal):
     def __init__(self, lc: "LiveCards", cid: str, kind: str, sym: str, current):
         super().__init__(title=f"{'Move stop' if kind == 'stop' else 'Move target'}: {sym}")
         self.lc, self.cid, self.kind = lc, cid, kind
-        hint = "only upward, below the current price" if kind == "stop" else "above the current price"
-        self.price = discord.ui.TextInput(label=f"New {kind} ({hint})", placeholder=f"now {cards._m(current)}",
-                                          max_length=12)
+        # Discord limits: label <= 45 characters, placeholder <= 100 (it refuses the form otherwise)
+        hint = "only up, below the price" if kind == "stop" else "above the current price"
+        self.price = discord.ui.TextInput(label=f"New {kind} price"[:45],
+                                          placeholder=f"now {cards._m(current)} · {hint}"[:100], max_length=12)
         self.add_item(self.price)
 
     async def on_submit(self, interaction: discord.Interaction):
