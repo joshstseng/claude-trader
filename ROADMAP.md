@@ -21,14 +21,16 @@ no orders        paper orders         no orders        paper orders    paper ord
 
 | Step | Name | Status |
 |---|---|---|
-| 1a | Alerts + trade log | 🟨 In progress |
-| 1b | One-tap approval → paper orders | ⬜ Not started |
-| 2 | Backtest #1 (baseline) | 🟨 In progress (framework) |
+| 1a | Alerts + trade log | 🟨 Built and live on Railway · 5-day live gate from Nov 18 |
+| 1b | One-tap approval → paper orders | 🟨 Built (1b.1–1b.7, 1b.8 part 1) · paper orders ON · gate: 2–3 weeks, ≥20 trades |
+| 2 | Backtest #1 (baseline) | 🟨 Framework done · baseline + 4 target runs · strategy variations next |
 | 3 | Claude filter + Backtest #2 | ⬜ Not started |
 | 4 | Hands-off on paper | ⬜ Not started |
 | 5 | Hands-off with real money | ⬜ Not started |
 
 Status key: ⬜ Not started · 🟨 In progress · ✅ Done
+
+**Daily checklist while the live gates run:** [plans/live-checklist.md](plans/live-checklist.md)
 
 ---
 
