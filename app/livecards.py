@@ -96,15 +96,18 @@ class ConfirmClose(discord.ui.View):
         button.disabled = True
         await interaction.response.edit_message(content="Closing…", view=None)
         res = await asyncio.to_thread(self.lc.manager.close, self.cid)
-        await interaction.edit_original_response(content=("✅ Done." if res.ok else "⛔ " + res.message))
-        if res.ok:
+        if res.ok:                                       # the card moving + #system say it: no leftover message
+            await interaction.delete_original_response()
             row = self.lc.log.order(self.cid)
             await self.lc.bot.post_system(confirmation(row["symbol"] if row else "?", res.message))
+        else:
+            await interaction.edit_original_response(content="⛔ " + res.message)
         await self.lc.sync(self.cid)
 
     @discord.ui.button(label="Keep it", style=discord.ButtonStyle.secondary)
     async def keep(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Kept. Nothing changed.", view=None)
+        await interaction.response.defer()
+        await interaction.delete_original_response()     # nothing changed: nothing to leave behind
 
 
 class PriceModal(discord.ui.Modal):
