@@ -22,12 +22,14 @@ def _day(iso: str) -> str:
     return date.fromisoformat(iso).strftime("%b %-d, %Y")
 
 
-def summary(run: dict, baseline: dict | None) -> str:
-    """The #backtests message for one run (run / baseline = the run-<id>.json contents)."""
+def summary(run: dict, baseline: dict | None, show_tag: bool = False) -> str:
+    """The #backtests message for one run (run / baseline = the run-<id>.json contents).
+    show_tag: the poster isn't this strategy's own bot, so say which strategy it is ([DEMO] …)."""
     m = run["headline"]
     from app.strategies import tag_for
     sid = ((run.get("settings") or {}).get("strategy") or {}).get("id", "orb")
-    head = f"**[{tag_for(sid)}] Backtest #{run['run_id']}: {run['label']}**"
+    head = (f"**[{tag_for(sid)}] Backtest #{run['run_id']}: {run['label']}**" if show_tag
+            else f"**Backtest #{run['run_id']}: {run['label']}**")
     period = f"{_day(run['from'])} → {_day(run['to'])}"
     if not m.get("trades"):
         return f"{head}\n{period} · no trades."
@@ -73,14 +75,32 @@ def find_baseline(run_id: int) -> dict | None:
     return best
 
 
+def poster_for(strategy_id: str) -> tuple[str | None, bool]:
+    """Which Discord bot posts a strategy's backtests: (its token or None for the default, is it the
+    strategy's own bot). Each bot posts its own when DISCORD_BOT_TOKEN_<ID> is in .env (e.g.
+    DISCORD_BOT_TOKEN_DEMO); otherwise the default bot (DISCORD_BOT_TOKEN, the one STRATEGY names,
+    ORB by default) posts, and tags other strategies' runs."""
+    import os
+    own = os.environ.get(f"DISCORD_BOT_TOKEN_{strategy_id.upper()}", "").strip()
+    if own:
+        return own, True
+    default = (os.environ.get("STRATEGY", "orb").strip().lower() or "orb")
+    return None, strategy_id == default
+
+
 def post(run_id: int) -> bool:
-    """Post run `run_id` to #backtests. False if the channel isn't set up."""
+    """Post run `run_id` to #backtests as the strategy's own bot when it has one. False if the
+    channel isn't set up."""
+    import dataclasses
     channel = settings.discord_backtests_channel()
     if channel is None:
         return False
     from app.discord_bot import post_once
     run = load(run_id)
-    text = summary(run, find_baseline(run_id))
-    asyncio.run(post_once(settings.discord_settings(), channel, [(text, None, None)],
-                          files=[REPORTS / f"run-{run_id}.md"]))
+    token, own = poster_for(_sid(run))
+    cfg = settings.discord_settings()
+    if token:
+        cfg = dataclasses.replace(cfg, bot_token=token)
+    text = summary(run, find_baseline(run_id), show_tag=not own)
+    asyncio.run(post_once(cfg, channel, [(text, None, None)], files=[REPORTS / f"run-{run_id}.md"]))
     return True

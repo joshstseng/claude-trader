@@ -14,7 +14,6 @@ from typing import Callable
 from app import outcomes, tradelog
 from app.market import Session
 from app.outcomes import Bar
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 ICON = {"target": "✅", "stop": "❌", "flat": "➖", "no_data": "❔"}
@@ -113,8 +112,8 @@ def summary_text(trade_log: tradelog.TradeLog, day: str, *, strategy: str = "orb
     rows = trade_log.signals(strategy=strategy, source=source, date=day, run_id=run_id)
     if not rows:
         if not scanned:
-            return f"{tag}**[{_tag()}] {label}** · no checks ran today (the bot started after the scan window)."
-        return (f"{tag}**[{_tag()}] {label}** · no signals today: no stock on the focus list broke out with enough volume."
+            return f"{tag}**{label}** · no checks ran today (the bot started after the scan window)."
+        return (f"{tag}**{label}** · no signals today: no stock on the focus list broke out with enough volume."
                 + (f"\n{extra}" if extra else ""))
 
     items = []
@@ -129,7 +128,7 @@ def summary_text(trade_log: tradelog.TradeLog, day: str, *, strategy: str = "orb
     picks = [i for i in items if i["you"] == "took"]
     held = [i for i in items if not i["alerted"]]
 
-    lines = [f"{tag}**[{_tag()}] {label}** · {len(items)} signals · {len(alerted)} alerted · you took {len(picks)}"]
+    lines = [f"{tag}**{label}** · {len(items)} signals · {len(alerted)} alerted · you took {len(picks)}"]
     if alerted:
         c, r, usd = _group(alerted)
         lines.append(f"**Alerted ({len(alerted)}):** {c} → {_fmt(r, usd, len(alerted))}")

@@ -88,7 +88,7 @@ async def run_day(day_bot: BotDay, session: market.Session, clock, *, simulated:
                 log.warning("focus list failed (try %d), retrying in %ds", attempt, PREMARKET_RETRY_S)
                 await asyncio.sleep(0 if simulated else PREMARKET_RETRY_S)
         if times:
-            await _say(notify, f"📋 **[{day_bot.tag}]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
+            await _say(notify, f"📋 focus list ready: {len(day_bot.focus)} stocks. Checking every "
                                f"{s['schedule']['check_every_minutes']} min, {times[0]:%-I:%M}–{times[-1]:%-I:%M %p} ET.")
     else:
         log.info("started after the scan window; no checks today")
@@ -110,7 +110,7 @@ async def run_day(day_bot: BotDay, session: market.Session, clock, *, simulated:
         sigs = day_bot.log.signals(run_id=day_bot.run_id)
         sent = day_bot.log.alerts_sent(strategy=day_bot.strategy.id, date=day_bot.day, source=day_bot.source,
                                        run_id=day_bot.run_id)
-        await _say(notify, f"🏁 **[{day_bot.tag}]** scan window closed: {len(sigs)} signals, {sent} alerts today.")
+        await _say(notify, f"🏁 scan window closed: {len(sigs)} signals, {sent} alerts today.")
 
     # out by the close (1b.6): flatten at 3:55 PM (12:55 on an early close), backup check 3 minutes later
     if flatten is not None and clock.now() < session.at(session.close):

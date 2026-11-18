@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
-from app.strategies import tag as _tag
 
 NY = ZoneInfo("America/New_York")
 ICON = {"target": "✅", "stop": "❌", "flat": "➖", "flatten": "🛑", "manual": ""}   # closed by you: no emoji
@@ -56,7 +55,7 @@ def waiting_card(order, now: datetime, timeout_s: int = 120) -> tuple[str, str]:
     """(title, body) while the limit entry waits to fill."""
     sent = datetime.fromisoformat(order["submitted_at"])
     left = max(0, int(timeout_s - (now - sent).total_seconds()))
-    title = f"⏳ [{_tag()}] {order['symbol']} · waiting for fill"
+    title = f"⏳ {order['symbol']} · waiting for fill"
     body = (f"Limit **{_m(order['limit_price'])}** · {order['qty']} sh · stop {_m(order['stop'])} · "
             f"target {_m(order['target'])}\n"
             + (f"Cancels in {left // 60}:{left % 60:02d} if not filled" if left else "Checking the fill…"))
@@ -70,9 +69,9 @@ def live_card(order, signal, price: float | None, now: datetime, flat_by: dtime,
     pnl = (price - fill) * qty if price is not None and fill is not None else None
     if pnl is not None:
         r = f" · {_r((price - fill) / risk)}" if risk else ""
-        title = f"{'🟢' if pnl >= 0 else '🔴'} [{_tag()}] {order['symbol']} · {_signed(pnl)}{r}"
+        title = f"{'🟢' if pnl >= 0 else '🔴'} {order['symbol']} · {_signed(pnl)}{r}"
     else:
-        title = f"⚪ [{_tag()}] {order['symbol']} · P&L unavailable"
+        title = f"⚪ {order['symbol']} · P&L unavailable"
     lines = [f"{qty} sh · in **{_m(fill)}** at {_et(order['filled_at'])} ET · now **{_m(price)}**"]
     block = [f"Stop    {_m(order['stop']):<10}" + (f" ({_pct(order['stop'], price)} away)" if price else ""),
              f"Target  {_m(order['target']):<10}" + (f" ({_pct(order['target'], price)} away)" if price else "")]
@@ -99,7 +98,7 @@ def closed_card(order, signal, events=(), backtest=None) -> tuple[str, str]:
     risk = (signal["entry"] - signal["stop"]) if signal else None
     r = f" · {_r((out_px - fill) / risk)}" if risk and fill is not None and out_px is not None else ""
     icon = ICON.get(reason, "•")
-    head = f"{icon + ' ' if icon else ''}[{_tag()}] {order['symbol']} · {WORD.get(reason, reason)} · **{_signed(pnl)}**{r}"
+    head = f"{icon + ' ' if icon else ''}{order['symbol']} · {WORD.get(reason, reason)} · **{_signed(pnl)}**{r}"
     held = ""
     try:
         a = datetime.fromisoformat(str(order["filled_at"]).replace("Z", "+00:00"))

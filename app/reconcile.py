@@ -27,7 +27,6 @@ from zoneinfo import ZoneInfo
 from app import paths, tradelog
 from app.account import DayAccount
 from app.market import Session
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -47,7 +46,7 @@ class ReconcileReport:
         return bool(self.notes or self.trades or self.problems)
 
     def text(self) -> str:
-        lines = ["🔄 **[" + _tag() + "] Restart check** (books vs Alpaca)"]
+        lines = ["🔄 **Restart check** (books vs Alpaca)"]
         lines += [f"• {n}" for n in self.notes] + [f"• {t}" for t in self.trades]
         lines += [f"⚠️ {p}" for p in self.problems]
         return "\n".join(lines)
@@ -80,7 +79,7 @@ class Reconciler:
                 if info.filled_price and info.filled_qty:
                     acct.update_fill(sym, info.filled_qty, info.filled_price)
                 rep.notes.append(f"{sym}: entry filled while I was away ({info.filled_qty} at ${info.filled_price:,.2f})")
-                rep.alert_updates.append((row["signal_id"], f"🟢 **[{_tag()}] {sym}** · in trade: {info.filled_qty} @ "
+                rep.alert_updates.append((row["signal_id"], f"🟢 **{sym}** · in trade: {info.filled_qty} @ "
                                           f"${info.filled_price:,.2f} · stop ${row['stop']:,.2f} · target "
                                           f"${row['target']:,.2f}", "live"))
             elif info.status in WAITING:
@@ -90,7 +89,7 @@ class Reconciler:
                     acct.cancel_entry(sym)
                     self.log.update_order(cid, status="cancelled", note="not filled in time (found on restart)")
                     rep.notes.append(f"{sym}: entry never filled, cancelled")
-                    rep.alert_updates.append((row["signal_id"], f"⌛ [{_tag()}] {sym} · limit never filled, nothing bought",
+                    rep.alert_updates.append((row["signal_id"], f"⌛ {sym} · limit never filled, nothing bought",
                                               "done"))
                 else:
                     rep.recheck.append((cid, self.timeout - age))
@@ -98,7 +97,7 @@ class Reconciler:
                 acct.cancel_entry(sym)
                 self.log.update_order(cid, status="cancelled", note=f"entry {info.status} while I was away")
                 rep.notes.append(f"{sym}: entry {info.status} while I was away, nothing bought")
-                rep.alert_updates.append((row["signal_id"], f"⌛ [{_tag()}] {sym} · entry {info.status}, nothing bought",
+                rep.alert_updates.append((row["signal_id"], f"⌛ {sym} · entry {info.status}, nothing bought",
                                           "done"))
 
         # 2. positions: ours vs Alpaca's
@@ -124,7 +123,7 @@ class Reconciler:
             icon = "✅ Target hit" if reason == "target" else "❌ Stopped out"
             rep.trades.append(f"{icon} {pos.symbol} while I was away: {closed.qty} at ${price:,.2f} "
                               f"({'+' if closed.pnl >= 0 else '−'}${abs(closed.pnl):,.2f})")
-            rep.alert_updates.append((pos.signal_id, f"{'✅' if reason == 'target' else '❌'} [{_tag()}] {pos.symbol} · "
+            rep.alert_updates.append((pos.signal_id, f"{'✅' if reason == 'target' else '❌'} {pos.symbol} · "
                                       f"{'target hit' if reason == 'target' else 'stopped out'} at ${price:,.2f} · "
                                       f"{'+' if closed.pnl >= 0 else '−'}${abs(closed.pnl):,.2f}", "done"))
         ours = {p.symbol for p in acct.open_positions}

@@ -55,7 +55,7 @@ class AfterCloseTest(unittest.TestCase):
         self.resolve()
         text = afterclose.summary_text(self.log, "2026-10-19", run_id=self.bot.run_id)
         lines = text.splitlines()
-        self.assertEqual(lines[0], "**[ORB] Mon Oct 19** · 2 signals · 2 alerted · you took 1")
+        self.assertEqual(lines[0], "**Mon Oct 19** · 2 signals · 2 alerted · you took 1")
         self.assertIn("**Alerted (2):** 1 ➖ · 1 ❔ → **+0.17R** (avg +0.09R) · +$7.62", text)
         self.assertIn("**Your picks (1):** 1 ➖ → **+0.17R** · +$7.62", text)
         self.assertIn("`10:35` **TSLA** ➖ flat +0.17R · you: took it", text)

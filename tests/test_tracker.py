@@ -44,11 +44,11 @@ class TrackerTest(unittest.TestCase):
     def test_entry_fill(self):
         u = self.t.handle("fill", self.order("B1", self.cid, price="365.90"))
         self.assertEqual(u.signal_id, self.sid)
-        self.assertEqual(u.text, "🟢 **[ORB] Bought TSLA**: 6 at $365.90 · plan $365.75 (+$0.15 a share slippage) · "
+        self.assertEqual(u.text, "🟢 **Bought TSLA**: 6 at $365.90 · plan $365.75 (+$0.15 a share slippage) · "
                                  "stop $358.32 · target $380.61")
         row = self.log.order_for_signal(self.sid)
         self.assertEqual((row["status"], row["filled_price"], row["entry_slippage"]), ("filled", 365.9, 0.15))
-        self.assertEqual((u.state, u.line), ("live", "🟢 **[ORB] TSLA** · in trade: 6 @ $365.90 · stop $358.32 · "
+        self.assertEqual((u.state, u.line), ("live", "🟢 **TSLA** · in trade: 6 @ $365.90 · stop $358.32 · "
                                                      "target $380.61"))
         self.assertIsNone(self.t.handle("fill", self.order("B1", self.cid, price="365.90")))   # once only
 
@@ -56,9 +56,9 @@ class TrackerTest(unittest.TestCase):
         self.t.handle("fill", self.order("B1", self.cid, price="365.90"))
         u = self.t.handle("fill", self.order("S1", "random-leg-id", price="358.20"))
         # P&L from the real fill (365.90), not the limit: (358.20 - 365.90) x 6 = -46.20; -7.70 / 7.43 risk
-        self.assertIn("❌ **[ORB] Stopped out** TSLA: sold 6 at $358.20 (stop $358.32) · **−$46.20**", u.text)
+        self.assertIn("❌ **Stopped out** TSLA: sold 6 at $358.20 (stop $358.32) · **−$46.20**", u.text)
         self.assertIn("−1.04R", u.text)
-        self.assertEqual((u.state, u.line), ("done", "❌ [ORB] TSLA · stopped out at $358.20 · −$46.20 · −1.04R"))
+        self.assertEqual((u.state, u.line), ("done", "❌ TSLA · stopped out at $358.20 · −$46.20 · −1.04R"))
         a = self.acct()
         self.assertEqual((a.open_positions, a.realized_pnl, a.cash), ([], -46.2, 5000.0))
         row = self.log.order_for_signal(self.sid)
@@ -68,7 +68,7 @@ class TrackerTest(unittest.TestCase):
     def test_target_hit(self):
         self.t.handle("fill", self.order("B1", self.cid, price="366.00"))
         u = self.t.handle("fill", self.order("T1", "x", price="380.61"))
-        self.assertTrue(u.text.startswith("✅ **[ORB] Target hit** TSLA: sold 6 at $380.61 (target $380.61) · **+$87.66**"))
+        self.assertTrue(u.text.startswith("✅ **Target hit** TSLA: sold 6 at $380.61 (target $380.61) · **+$87.66**"))
 
     def test_unfilled_entry_cancelled(self):
         u = self.t.handle("canceled", self.order("B1", self.cid, qty=0))

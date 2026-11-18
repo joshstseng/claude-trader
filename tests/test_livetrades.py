@@ -133,7 +133,7 @@ class TradeTest(unittest.TestCase):
     def test_waiting_card(self):
         now = datetime.fromisoformat(self.log.order(self.cid)["submitted_at"])
         title, body = cards.waiting_card(self.log.order(self.cid), now.replace(second=now.second), 120)
-        self.assertEqual(title, "⏳ [ORB] TSLA · waiting for fill")
+        self.assertEqual(title, "⏳ TSLA · waiting for fill")
         self.assertIn("Limit **$366.12** · 6 sh · stop $358.32 · target $380.61", body)
 
     def test_live_card_puts_the_pnl_in_the_title(self):
@@ -142,7 +142,7 @@ class TradeTest(unittest.TestCase):
         row, sig = self.log.order(self.cid), self.log.signal(self.sid)
         now = datetime(2026, 11, 19, 15, 45, tzinfo=timezone.utc)   # 10:45 AM ET
         title, body, pnl = cards.live_card(row, sig, 368.40, now, dtime(15, 55), self.log.events(self.cid))
-        self.assertEqual(title, "🟢 [ORB] TSLA · +$15.00 · +0.34R")         # 2.50 x 6; 2.50 / 7.43 risk
+        self.assertEqual(title, "🟢 TSLA · +$15.00 · +0.34R")         # 2.50 x 6; 2.50 / 7.43 risk
         self.assertEqual(pnl, 15.0)
         self.assertIn("6 sh · in **$365.90** at 10:36 AM ET · now **$368.40**", body)
         self.assertIn("Stop    $365.90    (−0.7% away)", body)
@@ -156,13 +156,13 @@ class TradeTest(unittest.TestCase):
         row, sig = self.log.order(self.cid), self.log.signal(self.sid)
         title, _, pnl = cards.live_card(row, sig, 363.00, datetime(2026, 11, 19, 15, 45, tzinfo=timezone.utc),
                                         dtime(15, 55))
-        self.assertEqual(title, "🔴 [ORB] TSLA · −$17.40 · −0.39R")
+        self.assertEqual(title, "🔴 TSLA · −$17.40 · −0.39R")
         self.assertLess(pnl, 0)
 
     def test_system_confirmation_line(self):
         from app.livecards import confirmation
         line = confirmation("NET", "Stop moved: $287.80 → $300.00.")
-        self.assertTrue(line.startswith("🔧 **[ORB] NET** · Stop moved: $287.80 → $300.00 · "))
+        self.assertTrue(line.startswith("🔧 **NET** · Stop moved: $287.80 → $300.00 · "))
         self.assertTrue(line.endswith(" ET"))
 
     def test_closed_card(self):
@@ -171,7 +171,7 @@ class TradeTest(unittest.TestCase):
                               exited_at="2026-11-19T18:12:00+00:00")
         row, sig = self.log.order(self.cid), self.log.signal(self.sid)
         head, body = cards.closed_card(row, sig, (), {"result": "target", "r_gross": 2.0})
-        self.assertEqual(head, "✅ [ORB] TSLA · target hit · **+$88.26** · +1.98R")
+        self.assertEqual(head, "✅ TSLA · target hit · **+$88.26** · +1.98R")
         self.assertIn("In $365.90 (10:36 AM) → out $380.61 (1:12 PM) · 6 sh · held 2h 36m", body)
         self.assertIn("Backtest said: ✅ +2.00R", body)
 
@@ -192,7 +192,7 @@ class TradeTest(unittest.TestCase):
         self.log.update_order(self.cid, status="closed", exit_reason="manual", exit_price=368.40, pnl_usd=15.0,
                               exited_at="2026-11-19T16:00:00+00:00")
         head, _ = cards.closed_card(self.log.order(self.cid), self.log.signal(self.sid))
-        self.assertEqual(head, "[ORB] TSLA · closed by you · **+$15.00** · +0.34R")
+        self.assertEqual(head, "TSLA · closed by you · **+$15.00** · +0.34R")
 
     def test_button_ids(self):
         m = re.fullmatch(TRADE_RE, f"trade:stop:{self.cid}")

@@ -24,7 +24,6 @@ from zoneinfo import ZoneInfo
 
 from app import paths, tradelog
 from app.account import DayAccount
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -45,8 +44,8 @@ class FlattenReport:
         return bool(self.exits or self.cancelled_entries or self.still_open or self.problems)
 
     def text(self) -> str:
-        head = {"flat": "🏁 **[" + _tag() + "] 3:55 PM: out for the day**", "backup": "🛟 **[" + _tag() + "] Backup check**",
-                "kill switch": "🛑 **[" + _tag() + "] Flattened by /flatten**"}.get(self.phase, f"**[{_tag()}] {self.phase}**")
+        head = {"flat": "🏁 **3:55 PM: out for the day**", "backup": "🛟 **Backup check**",
+                "kill switch": "🛑 **Flattened by /flatten**"}.get(self.phase, f"**{self.phase}**")
         lines = [head]
         for sym, qty, reason, price, pnl in self.exits:
             p = f"{'+' if (pnl or 0) >= 0 else '−'}${abs(pnl or 0):,.2f}" if pnl is not None else "P&L unknown"
@@ -96,7 +95,7 @@ class Flattener:
                     self.log.update_order(order["client_order_id"], status="cancelled",
                                           note=f"cancelled at the {phase}")
                     rep.cancelled_entries.append(pos.symbol)
-                    rep.alert_updates.append((pos.signal_id, f"⌛ [{_tag()}] {pos.symbol} · entry cancelled at the "
+                    rep.alert_updates.append((pos.signal_id, f"⌛ {pos.symbol} · entry cancelled at the "
                                                              f"{phase}, nothing bought", "done"))
                     continue
             if reason is None:
@@ -114,7 +113,7 @@ class Flattener:
             words = {"flat": "sold at the close", "flatten": "closed by /flatten", "stop": "stopped out",
                      "target": "target hit"}.get(reason, reason)
             pnl = closed.pnl or 0
-            rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} [{_tag()}] {pos.symbol} · {words} at "
+            rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} {pos.symbol} · {words} at "
                                                      f"${price:,.2f} · {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f}", "done"))
 
         # anything Alpaca still holds (or still has orders for) after all that. Sells that are still

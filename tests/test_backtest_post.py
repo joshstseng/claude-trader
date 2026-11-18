@@ -16,7 +16,7 @@ BASE = {"run_id": 1, "label": "baseline", "from": "2024-11-01", "to": "2026-11-1
 class SummaryTest(unittest.TestCase):
     def test_baseline(self):
         self.assertEqual(post.summary(BASE, BASE).splitlines(), [
-            "**[ORB] Backtest #1: baseline**",
+            "**Backtest #1: baseline**",
             "Nov 1, 2024 → Nov 17, 2026 · 683 trades · win rate 42% · **−0.038R a trade** (−$0.95) · "
             "total **−$650** · worst drawdown −$1,664",
             "✅ 116 target · ❌ 308 stop · ➖ 259 flat · before costs +0.018R",
@@ -29,6 +29,26 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("Changed: `exit.target=1R`", text)
         self.assertIn("vs baseline (#1): **+0.050R a trade better** · total +$990 · trades +17", text)
         self.assertIn("📈 has an edge after costs", text)
+
+
+class WhoPostsTest(unittest.TestCase):
+    """Each bot posts its own backtests; the default bot tags other strategies' runs."""
+
+    def test_orb_runs_post_as_orb_bot_without_a_tag(self):
+        with mock.patch.dict(os.environ, {"STRATEGY": ""}, clear=False):
+            os.environ.pop("DISCORD_BOT_TOKEN_ORB", None)
+            self.assertEqual(post.poster_for("orb"), (None, True))
+
+    def test_a_strategy_with_its_own_bot_posts_as_itself(self):
+        with mock.patch.dict(os.environ, {"DISCORD_BOT_TOKEN_DEMO": "demo-token"}):
+            self.assertEqual(post.poster_for("demo"), ("demo-token", True))
+
+    def test_a_strategy_without_a_bot_is_tagged(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DISCORD_BOT_TOKEN_DEMO", None)
+            self.assertEqual(post.poster_for("demo"), (None, False))
+        demo = {**BASE, "run_id": 7, "label": "demo", "settings": {"strategy": {"id": "demo"}, "overrides": []}}
+        self.assertTrue(post.summary(demo, None, show_tag=True).startswith("**[DEMO] Backtest #7: demo**"))
 
 
 class ChannelSettingTest(unittest.TestCase):

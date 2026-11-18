@@ -19,7 +19,6 @@ import discord
 
 from app import cards
 from app.market import NY
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 TRADE_RE = r"trade:(?P<action>cancel|close|be|stop|target):(?P<cid>[A-Za-z0-9\-]+)"
@@ -137,7 +136,7 @@ class PriceModal(discord.ui.Modal):
 
 def confirmation(sym: str, message: str) -> str:
     """The #system line for a change you made, e.g. 🔧 [ORB] NET · Stop moved: $287.80 → $300.00 · 2:52 PM ET."""
-    return f"🔧 **[{_tag()}] {sym}** · {message.rstrip('.')} · {datetime.now(NY):%-I:%M %p} ET"
+    return f"🔧 **{sym}** · {message.rstrip('.')} · {datetime.now(NY):%-I:%M %p} ET"
 
 
 def waiting_view(cid: str) -> discord.ui.View:
@@ -269,7 +268,7 @@ class LiveCards:
             await msg.delete()
         self.log.update_order(row["client_order_id"], live_card_message_id=None)
         ch = await self._channel(self.closed_channel)
-        await ch.send(f"-# ⌛ [{_tag()}] {row['symbol']} · {why}")
+        await ch.send(f"-# ⌛ {row['symbol']} · {why}")
 
     async def ensure_all(self) -> None:
         """Every open trade has a card (e.g. trades from before this feature, or after a restart)."""

@@ -86,7 +86,7 @@ class OrderDeskTest(unittest.TestCase):
                          ("TSLA", 364.54, 358.32, 375.90, 8))
         self.assertEqual(o["client_id"], f"orb-2026-10-19-{self.sid}")
         self.assertIn("Order sent", out.text)
-        self.assertEqual((out.state, out.line), ("live", "⏳ **[ORB] TSLA** · order sent: buy 8 at limit $364.54 · "
+        self.assertEqual((out.state, out.line), ("live", "⏳ **TSLA** · order sent: buy 8 at limit $364.54 · "
                                                          "stop $358.32 · target $375.90"))
         acct = DayAccount.for_day(self.root / "runs", "2026-10-19", self.rules)
         self.assertEqual(acct.entries_today, 1)                   # counts from the moment it's placed

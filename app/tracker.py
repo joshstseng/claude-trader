@@ -19,7 +19,6 @@ from pathlib import Path
 
 from app import paths, tradelog
 from app.account import DayAccount
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 FINAL = ("filled", "closed", "cancelled", "rejected", "expired")
@@ -81,15 +80,15 @@ class TradeTracker:
             if price is not None and qty:
                 acct.update_fill(sym, qty, price)        # book the real fill, not the limit
             return Update(row["signal_id"],
-                          f"🟢 **[{_tag()}] Bought {sym}**: {qty} at {_money(price)} · plan {_money(sig['entry'])} "
+                          f"🟢 **Bought {sym}**: {qty} at {_money(price)} · plan {_money(sig['entry'])} "
                           f"({_signed(slip or 0)} a share slippage) · stop {_money(row['stop'])} · "
                           f"target {_money(row['target'])}",
-                          line=(f"🟢 **[{_tag()}] {sym}** · in trade: {qty} @ {_money(price)} · stop {_money(row['stop'])}"
+                          line=(f"🟢 **{sym}** · in trade: {qty} @ {_money(price)} · stop {_money(row['stop'])}"
                                 f" · target {_money(row['target'])}"), state="live")
         if event == "partial_fill":
             self.log.update_order(cid, status="partially_filled", filled_qty=qty, filled_price=price)
-            return Update(row["signal_id"], f"◐ **[{_tag()}] {sym}** partly filled: {qty} of {row['qty']} at {_money(price)}",
-                          line=(f"◐ **[{_tag()}] {sym}** · partly filled {qty}/{row['qty']} @ {_money(price)} · "
+            return Update(row["signal_id"], f"◐ **{sym}** partly filled: {qty} of {row['qty']} at {_money(price)}",
+                          line=(f"◐ **{sym}** · partly filled {qty}/{row['qty']} @ {_money(price)} · "
                                 f"stop {_money(row['stop'])} · target {_money(row['target'])}"), state="live")
         if event in ("canceled", "expired", "rejected"):
             if row["status"] in FINAL:
@@ -99,8 +98,8 @@ class TradeTracker:
             self.log.update_order(cid, status="cancelled" if event != "rejected" else "rejected",
                                   note=f"entry {event}")
             if qty == 0:
-                return Update(row["signal_id"], f"⌛ **[{_tag()}] {sym}** entry {event}: nothing bought",
-                              line=f"⌛ [{_tag()}] {sym} · entry {event}, nothing bought", state="done")
+                return Update(row["signal_id"], f"⌛ **{sym}** entry {event}: nothing bought",
+                              line=f"⌛ {sym} · entry {event}, nothing bought", state="done")
         return None
 
     # ------------------------------------------------------------------ exits
@@ -122,10 +121,10 @@ class TradeTracker:
         self.log.update_order(cid, status="closed", exit_reason=part, exit_price=price,
                               exited_at=str(order.filled_at or ""), pnl_usd=closed.pnl,
                               exit_slippage=round(price - planned, 4))
-        head = "✅ **[" + _tag() + "] Target hit**" if part == "target" else "❌ **[" + _tag() + "] Stopped out**"
+        head = "✅ **Target hit**" if part == "target" else "❌ **Stopped out**"
         word = "target hit" if part == "target" else "stopped out"
         icon = "✅" if part == "target" else "❌"
-        line = (f"{icon} [{_tag()}] {sym} · {word} at {_money(price)} · {_signed(closed.pnl)} · "
+        line = (f"{icon} {sym} · {word} at {_money(price)} · {_signed(closed.pnl)} · "
                 f"{r:+.2f}R").replace("-", "−")
         return Update(row["signal_id"],
                       f"{head} {sym}: sold {closed.qty} at {_money(price)} ({part} {_money(planned)}) · "

@@ -25,7 +25,6 @@ from app import paths, tradelog
 from app.pipeline import SignalResult
 from app.settings import DiscordSettings
 from app.state import AppState
-from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 NY_FMT = "%-I:%M %p"
@@ -114,7 +113,7 @@ def alert_message(signal_id: int, source: str, r: SignalResult) -> tuple[str, di
     replay = source != "live"
     tag = "REPLAY · " if replay else ""
 
-    preview = (f"{tag}**[{_tag()}] {r.symbol}** breakout · buy {_money(plan.get('entry'))} · "
+    preview = (f"{tag}**{r.symbol}** breakout · buy {_money(plan.get('entry'))} · "
                f"stop {_money(plan.get('stop'))} · target {_money(plan.get('target'))}")
 
     lines = []
@@ -522,7 +521,7 @@ class TraderBot(discord.Client):
             from app.market import NY as _NY
             day = datetime.now(_NY).strftime("%Y-%m-%d")
             rep = await asyncio.to_thread(self.flattener.flatten, day, "kill switch")
-            text = rep.text() if rep.anything else "🛑 **[" + _tag() + "] /flatten**: nothing was open."
+            text = rep.text() if rep.anything else "🛑 **/flatten**: nothing was open."
             await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
             for sid, line, st in rep.alert_updates:
                 try:
@@ -631,7 +630,7 @@ class DiscordErrorHandler(logging.Handler):
         if record.name.startswith("discord"):
             return   # never loop on Discord's own errors
         try:
-            self.bot.post_error_threadsafe(f"Error: [{_tag()}] {record.getMessage()[:300]} (details in logs/app.log)")
+            self.bot.post_error_threadsafe(f"Error: {record.getMessage()[:300]} (details in logs/app.log)")
         except Exception:  # noqa: BLE001
             pass
 

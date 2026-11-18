@@ -90,7 +90,7 @@ class FlattenTest(unittest.TestCase):
                          ("closed", "flat", 367.24, 8.94))
         self.assertIn("➖ TSLA: 6 sh, flat at $367.24 (+$8.94)", rep.text())
         sid = self.log.order_for_signal(1)["signal_id"]
-        self.assertEqual(rep.alert_updates, [(sid, "➖ [ORB] TSLA · sold at the close at $367.24 · +$8.94", "done")])
+        self.assertEqual(rep.alert_updates, [(sid, "➖ TSLA · sold at the close at $367.24 · +$8.94", "done")])
 
     def test_a_trade_stopped_out_earlier_is_booked_from_its_legs(self):
         cid = self.trade("NVDA", 10, 180.0)
@@ -121,7 +121,7 @@ class FlattenTest(unittest.TestCase):
         self.alpaca.closed_at["TSLA"] = 366.0
         rep = self.flattener().flatten(DAY, phase="kill switch")
         self.assertEqual(rep.exits[0][2], "flatten")
-        self.assertTrue(rep.text().startswith("🛑 **[ORB] Flattened by /flatten**"))
+        self.assertTrue(rep.text().startswith("🛑 **Flattened by /flatten**"))
 
     def test_nothing_open_reports_nothing(self):
         self.assertFalse(self.flattener().flatten(DAY).anything)

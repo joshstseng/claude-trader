@@ -33,7 +33,7 @@ class AlertMessageTest(unittest.TestCase):
 
     def test_preview_line_is_what_the_phone_shows(self):
         preview, _ = discord_bot.alert_message(12, "live", self.r)
-        self.assertEqual(preview, "**[ORB] TSLA** breakout · buy $364.18 · stop $358.32 · target $375.90")
+        self.assertEqual(preview, "**TSLA** breakout · buy $364.18 · stop $358.32 · target $375.90")
 
     def test_numbers_are_one_aligned_block(self):
         self.assertEqual(discord_bot.plan_block(self.r), "\n".join([
@@ -145,25 +145,25 @@ if __name__ == "__main__":
 
 class ResolvedAlertTest(unittest.TestCase):
     """#setups: an alert stays a full card only while it needs you; then it collapses."""
-    ORIGINAL = "<@123456789> REPLAY · **[ORB] TSLA** breakout · buy $365.75 · stop $358.32 · target $380.61"
+    ORIGINAL = "<@123456789> REPLAY · **TSLA** breakout · buy $365.75 · stop $358.32 · target $380.61"
 
     def test_title_drops_the_mention_and_bold(self):
         self.assertEqual(discord_bot.alert_title(self.ORIGINAL),
-                         "REPLAY · [ORB] TSLA breakout · buy $365.75 · stop $358.32 · target $380.61")
+                         "REPLAY · TSLA breakout · buy $365.75 · stop $358.32 · target $380.61")
 
     def test_skipped_collapses_to_one_small_line_without_the_mention(self):
         c = discord_bot.resolved_content("⏭️ Skipped 10:37 AM", "done", self.ORIGINAL)
-        self.assertEqual(c, "-# ⏭️ Skipped 10:37 AM · REPLAY · [ORB] TSLA breakout · buy $365.75 · "
+        self.assertEqual(c, "-# ⏭️ Skipped 10:37 AM · REPLAY · TSLA breakout · buy $365.75 · "
                             "stop $358.32 · target $380.61")
         self.assertNotIn("<@", c)
 
     def test_open_trade_stays_a_normal_line(self):
-        c = discord_bot.resolved_content("🟢 **[ORB] TSLA** · in trade: 6 @ $365.90", "live")
-        self.assertEqual(c, "🟢 **[ORB] TSLA** · in trade: 6 @ $365.90")
+        c = discord_bot.resolved_content("🟢 **TSLA** · in trade: 6 @ $365.90", "live")
+        self.assertEqual(c, "🟢 **TSLA** · in trade: 6 @ $365.90")
 
     def test_finished_trade_collapses(self):
-        c = discord_bot.resolved_content("✅ [ORB] TSLA · target hit at $380.61 · +$87.66 · +1.97R", "done")
-        self.assertTrue(c.startswith("-# ✅ [ORB] TSLA · target hit"))
+        c = discord_bot.resolved_content("✅ TSLA · target hit at $380.61 · +$87.66 · +1.97R", "done")
+        self.assertTrue(c.startswith("-# ✅ TSLA · target hit"))
 
     def _msg(self, *buttons):
         from types import SimpleNamespace as NS
@@ -188,8 +188,8 @@ class StampTest(unittest.TestCase):
                          "📝 Approved 2:24 PM ET (test alert: no order placed)")
         self.assertEqual(discord_bot.stamp("⏭️ Skipped", self.WHEN), "⏭️ Skipped 2:24 PM ET")
         self.assertEqual(discord_bot.stamp("⛔ Not placed (stale)", self.WHEN), "⛔ Not placed 2:24 PM ET (stale)")
-        self.assertEqual(discord_bot.stamp("⏳ **[ORB] TSLA** · order sent: buy 6", self.WHEN),
-                         "⏳ **[ORB] TSLA** · order sent 2:24 PM ET: buy 6")
+        self.assertEqual(discord_bot.stamp("⏳ **TSLA** · order sent: buy 6", self.WHEN),
+                         "⏳ **TSLA** · order sent 2:24 PM ET: buy 6")
 
     def test_server_time_zone_doesnt_matter(self):
         """Railway runs in UTC; the stamp must still be New York time."""
