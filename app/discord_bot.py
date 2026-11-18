@@ -25,6 +25,7 @@ from app import paths, tradelog
 from app.pipeline import SignalResult
 from app.settings import DiscordSettings
 from app.state import AppState
+from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 NY_FMT = "%-I:%M %p"
@@ -113,7 +114,7 @@ def alert_message(signal_id: int, source: str, r: SignalResult) -> tuple[str, di
     replay = source != "live"
     tag = "REPLAY · " if replay else ""
 
-    preview = (f"{tag}**[ORB] {r.symbol}** breakout · buy {_money(plan.get('entry'))} · "
+    preview = (f"{tag}**[{_tag()}] {r.symbol}** breakout · buy {_money(plan.get('entry'))} · "
                f"stop {_money(plan.get('stop'))} · target {_money(plan.get('target'))}")
 
     lines = []
@@ -232,7 +233,7 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
             try:
                 card = await bot.cards.post(out.client_id)
             except Exception:  # noqa: BLE001
-                log.exception("[ORB] couldn't post the live card for %s", out.client_id)
+                log.exception("couldn't post the live card for %s", out.client_id)
             link = bot.cards.link(out.client_id) if card else None
             line = stamp("⏳ Approved", now) + (f" → [live card]({link})" if link else "")
             await interaction.edit_original_response(content=resolved_content(line, "done", original),
@@ -372,7 +373,7 @@ class TraderBot(discord.Client):
             try:
                 await self.sweep_setups()
             except Exception:  # noqa: BLE001 - a hiccup here must never stop the bot
-                log.warning("[ORB] alert sweep failed", exc_info=True)
+                log.warning("alert sweep failed", exc_info=True)
             await asyncio.sleep(30)
 
     async def sweep_setups(self) -> int:
@@ -452,7 +453,7 @@ class TraderBot(discord.Client):
                     fresh = await message.channel.fetch_message(message.id)
                     await fresh.edit(content=resolved_content(out.line, out.state), embeds=[], view=None)
             except Exception:  # noqa: BLE001
-                log.exception("[ORB] follow-up for %s failed", client_id)
+                log.exception("follow-up for %s failed", client_id)
         asyncio.create_task(follow())
 
     def post_error_threadsafe(self, text: str) -> None:
@@ -521,7 +522,7 @@ class TraderBot(discord.Client):
             from app.market import NY as _NY
             day = datetime.now(_NY).strftime("%Y-%m-%d")
             rep = await asyncio.to_thread(self.flattener.flatten, day, "kill switch")
-            text = rep.text() if rep.anything else "🛑 **[ORB] /flatten**: nothing was open."
+            text = rep.text() if rep.anything else "🛑 **[" + _tag() + "] /flatten**: nothing was open."
             await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
             for sid, line, st in rep.alert_updates:
                 try:
@@ -630,7 +631,7 @@ class DiscordErrorHandler(logging.Handler):
         if record.name.startswith("discord"):
             return   # never loop on Discord's own errors
         try:
-            self.bot.post_error_threadsafe(f"Error: {record.getMessage()[:300]} (details in logs/app.log)")
+            self.bot.post_error_threadsafe(f"Error: [{_tag()}] {record.getMessage()[:300]} (details in logs/app.log)")
         except Exception:  # noqa: BLE001
             pass
 

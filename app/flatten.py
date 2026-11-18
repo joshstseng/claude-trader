@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from app import paths, tradelog
 from app.account import DayAccount
+from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -44,8 +45,8 @@ class FlattenReport:
         return bool(self.exits or self.cancelled_entries or self.still_open or self.problems)
 
     def text(self) -> str:
-        head = {"flat": "🏁 **[ORB] 3:55 PM: out for the day**", "backup": "🛟 **[ORB] Backup check**",
-                "kill switch": "🛑 **[ORB] Flattened by /flatten**"}.get(self.phase, f"**[ORB] {self.phase}**")
+        head = {"flat": "🏁 **[" + _tag() + "] 3:55 PM: out for the day**", "backup": "🛟 **[" + _tag() + "] Backup check**",
+                "kill switch": "🛑 **[" + _tag() + "] Flattened by /flatten**"}.get(self.phase, f"**[{_tag()}] {self.phase}**")
         lines = [head]
         for sym, qty, reason, price, pnl in self.exits:
             p = f"{'+' if (pnl or 0) >= 0 else '−'}${abs(pnl or 0):,.2f}" if pnl is not None else "P&L unknown"
@@ -75,7 +76,7 @@ class Flattener:
         try:
             closing = dict(self.broker.close_all())               # {symbol: close order id}
         except Exception as e:  # noqa: BLE001
-            log.error("[ORB] flatten (%s): closing positions failed: %s", phase, e)
+            log.error("flatten (%s): closing positions failed: %s", phase, e)
             rep.problems.append(f"closing positions failed: {str(e)[:150]}")
             closing = {}
         fills = self._wait_for_fills(closing)
@@ -95,7 +96,7 @@ class Flattener:
                     self.log.update_order(order["client_order_id"], status="cancelled",
                                           note=f"cancelled at the {phase}")
                     rep.cancelled_entries.append(pos.symbol)
-                    rep.alert_updates.append((pos.signal_id, f"⌛ [ORB] {pos.symbol} · entry cancelled at the "
+                    rep.alert_updates.append((pos.signal_id, f"⌛ [{_tag()}] {pos.symbol} · entry cancelled at the "
                                                              f"{phase}, nothing bought", "done"))
                     continue
             if reason is None:
@@ -113,7 +114,7 @@ class Flattener:
             words = {"flat": "sold at the close", "flatten": "closed by /flatten", "stop": "stopped out",
                      "target": "target hit"}.get(reason, reason)
             pnl = closed.pnl or 0
-            rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} [ORB] {pos.symbol} · {words} at "
+            rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} [{_tag()}] {pos.symbol} · {words} at "
                                                      f"${price:,.2f} · {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f}", "done"))
 
         # anything Alpaca still holds (or still has orders for) after all that. Sells that are still
@@ -130,7 +131,7 @@ class Flattener:
                 break
             time.sleep(1)
         if rep.still_open:
-            log.error("[ORB] %s: still open after flattening: %s", phase, ", ".join(rep.still_open))
+            log.error("%s: still open after flattening: %s", phase, ", ".join(rep.still_open))
         return rep
 
     def repair_exits(self, day: str) -> list[tuple]:

@@ -25,7 +25,9 @@ def _day(iso: str) -> str:
 def summary(run: dict, baseline: dict | None) -> str:
     """The #backtests message for one run (run / baseline = the run-<id>.json contents)."""
     m = run["headline"]
-    head = f"**[ORB] Backtest #{run['run_id']}: {run['label']}**"
+    from app.strategies import tag_for
+    sid = ((run.get("settings") or {}).get("strategy") or {}).get("id", "orb")
+    head = f"**[{tag_for(sid)}] Backtest #{run['run_id']}: {run['label']}**"
     period = f"{_day(run['from'])} → {_day(run['to'])}"
     if not m.get("trades"):
         return f"{head}\n{period} · no trades."
@@ -54,12 +56,18 @@ def load(run_id: int) -> dict:
     return json.loads((REPORTS / f"run-{run_id}.json").read_text())
 
 
+def _sid(run: dict) -> str:
+    return ((run.get("settings") or {}).get("strategy") or {}).get("id", "orb")
+
+
 def find_baseline(run_id: int) -> dict | None:
-    """The latest run labeled 'baseline' (other than this one)."""
+    """The latest run labeled 'baseline' (other than this one) for the same strategy."""
     best = None
+    this = REPORTS / f"run-{run_id}.json"
+    sid = _sid(json.loads(this.read_text())) if this.exists() else "orb"
     for f in REPORTS.glob("run-*.json"):
         r = json.loads(f.read_text())
-        if (r.get("label") or "").lower() == "baseline" and r["run_id"] != run_id:
+        if (r.get("label") or "").lower() == "baseline" and r["run_id"] != run_id and _sid(r) == sid:
             if best is None or r["run_id"] > best["run_id"]:
                 best = r
     return best

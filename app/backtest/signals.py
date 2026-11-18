@@ -1,7 +1,7 @@
-"""The signal engine: the live ORB rules applied to history.
+"""The signal engine: a strategy's live rules applied to history (ORB by default).
 
 For each market day and each stock on that day's focus list:
-  decide  app.engine.decide, the SAME function the live bot calls (the skill's entry.evaluate,
+  decide  the strategy's brain; for ORB app.engine.decide, the SAME function the live bot calls (the skill's entry.evaluate,
           exit.compute and size.size_trade, plus the live scan's filters), at the scan window's
           last check
   result  app.outcomes.resolve (target / stop / flat at 3:55), after costs
@@ -21,6 +21,7 @@ from datetime import time as dtime
 from typing import Callable
 
 from app import engine, outcomes
+from app.strategies import brain_for
 from app.afterclose import flat_by_for
 from app.market import Session
 from app.outcomes import NY, Bar
@@ -58,12 +59,13 @@ class BtSignal:
 def signal_for(symbol: str, bars: list[Bar], session: Session, settings: dict, rules: dict, *,
                cost_pct: float, focus_rank: int = 0, outcome_bars: list[Bar] | None = None) -> BtSignal | None:
     """One stock, one day. None if it never triggered (or was skipped by the scan's filters).
-    The decision is app.engine.decide, the same function the live bot calls, run at the scan
-    window's last check. `outcome_bars`: score the trade on different bars than the ones that
+    The decision is the strategy's brain (for ORB: app.engine.decide), the same function the live
+    bot calls, run at the brain's last check of the day. `outcome_bars`: score the trade on different bars than the ones that
     decided it (e.g. decide on the free IEX feed, score on the whole market's bars)."""
     flat_by = flat_by_for(session, rules)
-    d = engine.decide(symbol, engine.chart_from_bars(symbol, bars), session,
-                      engine.window_end_check(session, settings), settings, rules, flat_by=flat_by)
+    brain = brain_for(settings)
+    d = brain.decide(symbol, engine.chart_from_bars(symbol, bars), session,
+                     brain.backtest_check_time(session), rules, flat_by=flat_by)
     if not d.triggered or d.status == "skipped":
         return None
     trig, orng = d.entry_res["trigger"], d.entry_res["opening_range"]

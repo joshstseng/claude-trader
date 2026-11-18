@@ -12,7 +12,7 @@ from datetime import date, datetime, time as dtime, timedelta
 from typing import Awaitable, Callable
 
 from app import market
-from app.routine import OrbDay
+from app.routine import BotDay
 from app.state import AppState
 
 log = logging.getLogger(__name__)
@@ -58,22 +58,22 @@ async def _say(notify: Notify | None, text: str) -> None:
             log.exception("could not post: %s", text)
 
 
-async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated: bool,
+async def run_day(day_bot: BotDay, session: market.Session, clock, *, simulated: bool,
                   focus: list[str] | None = None, state: AppState | None = None,
                   notify: Notify | None = None,
-                  after_close: Callable[[OrbDay], Awaitable[None]] | None = None,
-                  flatten: Callable[[OrbDay, str], Awaitable[None]] | None = None) -> None:
+                  after_close: Callable[[BotDay], Awaitable[None]] | None = None,
+                  flatten: Callable[[BotDay, str], Awaitable[None]] | None = None) -> None:
     """One trading day. Checks whose time has passed are skipped (a later check catches up).
     If the app starts after the scan window, the focus list isn't built at all."""
     s = day_bot.s
     as_arg = (lambda t: t.strftime("%Y-%m-%d %H:%M")) if simulated else (lambda t: None)
-    times = [t for t in market.check_times(session, s) if clock.now() <= t + timedelta(minutes=2)]
+    times = [t for t in day_bot.brain.check_times(session) if clock.now() <= t + timedelta(minutes=2)]
     day_bot.session = session
     if state:
         state.day, state.session = day_bot, session
 
     if times:
-        pre = session.at(_hhmm(s["schedule"]["premarket_at"]))
+        pre = day_bot.brain.premarket_at(session)
         await clock.sleep_until(pre)
         for attempt in range(1, PREMARKET_TRIES + 1):      # e.g. Yahoo blocking or down: retry, then give up loudly
             try:
@@ -81,17 +81,17 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
                 break
             except Exception:  # noqa: BLE001
                 if attempt == PREMARKET_TRIES:
-                    log.exception("[ORB] couldn't build today's focus list after %d tries: no checks today",
+                    log.exception("couldn't build today's focus list after %d tries: no checks today",
                                   PREMARKET_TRIES)
                     times = []
                     break
-                log.warning("[ORB] focus list failed (try %d), retrying in %ds", attempt, PREMARKET_RETRY_S)
+                log.warning("focus list failed (try %d), retrying in %ds", attempt, PREMARKET_RETRY_S)
                 await asyncio.sleep(0 if simulated else PREMARKET_RETRY_S)
         if times:
-            await _say(notify, f"📋 **[ORB]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
+            await _say(notify, f"📋 **[{day_bot.tag}]** focus list ready: {len(day_bot.focus)} stocks. Checking every "
                                f"{s['schedule']['check_every_minutes']} min, {times[0]:%-I:%M}–{times[-1]:%-I:%M %p} ET.")
     else:
-        log.info("[ORB] started after the scan window; no checks today")
+        log.info("started after the scan window; no checks today")
 
     for t in times:
         if state:
@@ -102,7 +102,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
             if state:
                 state.last_report = report
         except Exception:                 # noqa: BLE001 - one bad check must not end the day
-            log.exception("[ORB] check at %s failed", t.strftime("%H:%M"))
+            log.exception("check at %s failed", t.strftime("%H:%M"))
     if state:
         state.next_check = None
 
@@ -110,7 +110,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
         sigs = day_bot.log.signals(run_id=day_bot.run_id)
         sent = day_bot.log.alerts_sent(strategy=day_bot.strategy.id, date=day_bot.day, source=day_bot.source,
                                        run_id=day_bot.run_id)
-        await _say(notify, f"🏁 **[ORB]** scan window closed: {len(sigs)} signals, {sent} alerts today.")
+        await _say(notify, f"🏁 **[{day_bot.tag}]** scan window closed: {len(sigs)} signals, {sent} alerts today.")
 
     # out by the close (1b.6): flatten at 3:55 PM (12:55 on an early close), backup check 3 minutes later
     if flatten is not None and clock.now() < session.at(session.close):
@@ -121,7 +121,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
             try:
                 await flatten(day_bot, phase)
             except Exception:  # noqa: BLE001 - logged as an error: pings you
-                log.exception("[ORB] flatten (%s) failed", phase)
+                log.exception("flatten (%s) failed", phase)
 
     close_at = session.at(_hhmm(s["schedule"]["after_close_at"]))
     if session.early_close:
@@ -132,7 +132,7 @@ async def run_day(day_bot: OrbDay, session: market.Session, clock, *, simulated:
     day_bot.finish()
 
 
-async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealClock, *,
+async def run_forever(make_day: Callable[[str], BotDay], calendar, clock: RealClock, *,
                       state: AppState | None = None, notify: Notify | None = None, after_close=None, flatten=None,
                       catch_up: Callable[[str, market.Session], Awaitable[None]] | None = None):
     """Live: run every market day, sleep through nights, weekends and holidays.
@@ -151,7 +151,7 @@ async def run_forever(make_day: Callable[[str], OrbDay], calendar, clock: RealCl
             try:
                 await catch_up(now.date().isoformat(), session)
             except Exception:  # noqa: BLE001
-                log.exception("[ORB] after-close catch-up failed")
+                log.exception("after-close catch-up failed")
         elif session is None and now.weekday() < 5:
             await _say(notify, f"🏖️ Market closed today ({now:%a %b %-d}). See you next market day.")
         tomorrow = datetime.combine(now.date() + timedelta(days=1), dtime(7, 0), tzinfo=NY)

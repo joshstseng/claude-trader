@@ -1,6 +1,6 @@
 """Takes one signal through the ORB bot's steps:
 
-    entry + stop/target + shares   app.engine.decide (in-process; the same code the backtest runs)
+    entry + stop/target + shares   the strategy's brain (ORB: app.engine.decide), the same code the backtest runs
     risk                           the skill's check.py (the final gate)
     time machine, news             the skill's scripts, only when the signal will be alerted
 
@@ -169,8 +169,6 @@ def run_signal(
     The time machine and news are the slow steps and are information for the alert only, so they
     run last, after the risk check. `want_extras(result)` can skip them for a signal that won't be
     alerted (e.g. stale or over the daily cap)."""
-    if strategy.id != "orb":
-        raise ValueError(f"run_signal only knows the ORB bot so far, not {strategy.id!r}")
     s = strategy.settings
     off = offline or Offline()
     symbol = symbol.upper()
@@ -191,7 +189,8 @@ def run_signal(
         result.steps[name] = r
         return r
 
-    # 1-3. entry, stop/target and shares: app.engine.decide, the same code the backtest runs
+    # 1-3. entry, stop/target and shares: the strategy's brain (for ORB: app.engine.decide), the same
+    #      code the backtest runs
     entry_mod, size_mod = skill.module("entry"), skill.module("size")
     when = (datetime.strptime(now, "%Y-%m-%d %H:%M").replace(tzinfo=NY) if now else datetime.now(NY))
     sess = session or market.SkillCalendar().session(when.date()) or market.Session(when.date(), dtime(9, 30), dtime(16, 0))
@@ -201,7 +200,7 @@ def run_signal(
         result.steps["entry"] = StepResult("entry", False, 1, error=str(e))
         result.reason = f"entry: {e}"
         return result
-    d = engine.decide(symbol, chart, sess, when, s, risk_rules, flat_by=_flat_by(sess, risk_rules))
+    d = strategy.brain.decide(symbol, chart, sess, when, risk_rules, flat_by=_flat_by(sess, risk_rules))
     utc = engine.to_utc_naive(when)
     entry_mod.write_json(str(folder / "trader" / "entry.json"), entry_mod.entry_doc(d.entry_res, utc))
     result.steps["entry"] = StepResult("entry", d.triggered, 0, data=entry_mod.public(d.entry_res))

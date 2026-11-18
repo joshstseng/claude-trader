@@ -99,12 +99,12 @@ def _line(m: dict) -> str:
             f"{pf} | {_usd(m['max_dd_usd'])} |")
 
 
-def render(*, run_id: int, label: str, settings_line: str, code: str, views: dict[str, dict],
+def render(*, run_id: int, label: str, settings_line: str, code: str, views: dict[str, dict], tag: str = "ORB",
            traded: list[BtSignal], every: list[BtSignal], why_not: Counter,
            baseline: tuple[int, str, dict] | None) -> str:
     """The markdown report. views: {name: metrics}; the first is the headline (as traded)."""
     head_name, m = next(iter(views.items()))
-    out = [f"# ORB backtest run #{run_id}: {label}", "", settings_line, f"Code: `{code}`", ""]
+    out = [f"# {tag} backtest run #{run_id}: {label}", "", settings_line, f"Code: `{code}`", ""]
     if m.get("trades"):
         verdict = "has an edge" if m["avg_r"] > 0 else "loses money"
         out += [f"## Headline: {head_name[0].lower() + head_name[1:]}", "",

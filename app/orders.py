@@ -26,6 +26,7 @@ from typing import Callable
 
 from app import paths, pipeline, skill, tradelog
 from app.account import DayAccount
+from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 LIVE_ORDER_STATES = ("new", "accepted", "pending_new", "accepted_for_bidding", "held")
@@ -137,7 +138,7 @@ class OrderDesk:
         except Exception as e:  # noqa: BLE001 - Alpaca refused it: say why, place nothing
             existing = self.broker.order(client_id)            # e.g. a double tap raced us: it exists
             if existing is None:
-                log.warning("[ORB] order for %s refused by Alpaca: %s", sym, e)
+                log.warning("order for %s refused by Alpaca: %s", sym, e)
                 self.log.add_order(signal_id, client_id, sym, qty, limit, stop, target, status="rejected")
                 self.log.update_order(client_id, note=str(e)[:300])
                 return Outcome(False, f"⛔ Alpaca refused the order: {str(e)[:150]}",
@@ -149,9 +150,9 @@ class OrderDesk:
         self.log.add_order(signal_id, client_id, sym, qty, limit, stop, target, broker_order_id=info.broker_id)
         self.log.update_order(client_id, stop_order_id=info.stop_id, target_order_id=info.target_id)
         self.log.record_response(signal_id, "took", user_id=user_id)
-        log.info("[ORB] order placed: buy %d %s limit %.2f stop %.2f target %.2f (%s)", qty, sym, limit, stop,
+        log.info("order placed: buy %d %s limit %.2f stop %.2f target %.2f (%s)", qty, sym, limit, stop,
                  target, client_id)
-        line = (f"⏳ **[ORB] {sym}** · order sent: buy {qty} at limit {_money(limit)} · stop {_money(stop)} · "
+        line = (f"⏳ **[{_tag()}] {sym}** · order sent: buy {qty} at limit {_money(limit)} · stop {_money(stop)} · "
                 f"target {_money(target)}")
         return Outcome(True, f"⏳ **Order sent** (paper): buy {qty} {sym} limit {_money(limit)} · "
                              f"stop {_money(stop)} · target {_money(target)} · max loss {_money(sizing['max_loss'])}",
@@ -173,7 +174,7 @@ class OrderDesk:
                 DayAccount.for_day(self.runs_root, sig["date"], self.rules).update_fill(
                     row["symbol"], info.filled_qty, info.filled_price)
             slip = (info.filled_price or 0) - (row["limit_price"] or 0)
-            in_trade = (f"🟢 **[ORB] {row['symbol']}** · in trade: {info.filled_qty} @ {_money(info.filled_price)} · "
+            in_trade = (f"🟢 **[{_tag()}] {row['symbol']}** · in trade: {info.filled_qty} @ {_money(info.filled_price)} · "
                         f"stop {_money(row['stop'])} · target {_money(row['target'])}")
             return Outcome(True, f"✅ **Filled** {info.filled_qty} {row['symbol']} at {_money(info.filled_price)} "
                                  f"({'−' if slip < 0 else '+'}{_money(abs(slip))} vs the limit). "
@@ -183,21 +184,21 @@ class OrderDesk:
                                   filled_price=info.filled_price)
             return Outcome(True, f"◐ Partly filled: {info.filled_qty} of {row['qty']} {row['symbol']} at "
                                  f"{_money(info.filled_price)}. Tracking continues.", client_id,
-                           line=(f"◐ **[ORB] {row['symbol']}** · partly filled {info.filled_qty}/{row['qty']} @ "
+                           line=(f"◐ **[{_tag()}] {row['symbol']}** · partly filled {info.filled_qty}/{row['qty']} @ "
                                  f"{_money(info.filled_price)} · stop {_money(row['stop'])} · target {_money(row['target'])}"),
                            state="live")
         if info.status in LIVE_ORDER_STATES:
             try:
                 self.broker.cancel(info.broker_id)
             except Exception as e:  # noqa: BLE001
-                log.error("[ORB] couldn't cancel unfilled %s: %s", client_id, e)
+                log.error("couldn't cancel unfilled %s: %s", client_id, e)
                 return Outcome(False, f"⚠️ Not filled, and cancelling failed: {str(e)[:120]}", client_id)
             sig = self.log.signal(row["signal_id"])
             DayAccount.for_day(self.runs_root, sig["date"], self.rules).cancel_entry(row["symbol"])
             self.log.update_order(client_id, status="cancelled", note="not filled within the timeout")
             return Outcome(False, f"⌛ **Not filled** within {self.o.get('fill_timeout_seconds', 120)}s at the "
                                   f"{_money(row['limit_price'])} limit: cancelled, nothing bought.", client_id,
-                           line=f"⌛ [ORB] {row['symbol']} · limit {_money(row['limit_price'])} never filled, nothing bought",
+                           line=f"⌛ [{_tag()}] {row['symbol']} · limit {_money(row['limit_price'])} never filled, nothing bought",
                            state="done")
         self.log.update_order(client_id, status=info.status)
         if info.status in ("canceled", "cancelled", "expired", "rejected"):
@@ -206,6 +207,6 @@ class OrderDesk:
         return Outcome(False, f"Order is {info.status}.", client_id)
 
     def _refuse(self, signal_id: int, why: str, final: bool = True) -> Outcome:
-        log.info("[ORB] approval refused for signal %s: %s", signal_id, why)
+        log.info("approval refused for signal %s: %s", signal_id, why)
         return Outcome(False, f"⛔ **Not placed**: {why}.", final=final,
                        line=f"⛔ Not placed ({why})" if final else None, state="done" if final else "active")

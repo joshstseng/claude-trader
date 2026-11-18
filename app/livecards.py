@@ -19,6 +19,7 @@ import discord
 
 from app import cards
 from app.market import NY
+from app.strategies import tag as _tag
 
 log = logging.getLogger(__name__)
 TRADE_RE = r"trade:(?P<action>cancel|close|be|stop|target):(?P<cid>[A-Za-z0-9\-]+)"
@@ -55,7 +56,7 @@ class TradeButton(discord.ui.DynamicItem[discord.ui.Button], template=TRADE_RE):
         try:
             await self._handle(interaction)
         except Exception as e:  # noqa: BLE001 - say what went wrong instead of "didn't respond"
-            log.exception("[ORB] trade button %s failed", self.action)
+            log.exception("trade button %s failed", self.action)
             msg = f"⚠️ That didn't work: {str(e)[:150]}"
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
@@ -136,7 +137,7 @@ class PriceModal(discord.ui.Modal):
 
 def confirmation(sym: str, message: str) -> str:
     """The #system line for a change you made, e.g. 🔧 [ORB] NET · Stop moved: $287.80 → $300.00 · 2:52 PM ET."""
-    return f"🔧 **[ORB] {sym}** · {message.rstrip('.')} · {datetime.now(NY):%-I:%M %p} ET"
+    return f"🔧 **[{_tag()}] {sym}** · {message.rstrip('.')} · {datetime.now(NY):%-I:%M %p} ET"
 
 
 def waiting_view(cid: str) -> discord.ui.View:
@@ -268,7 +269,7 @@ class LiveCards:
             await msg.delete()
         self.log.update_order(row["client_order_id"], live_card_message_id=None)
         ch = await self._channel(self.closed_channel)
-        await ch.send(f"-# ⌛ [ORB] {row['symbol']} · {why}")
+        await ch.send(f"-# ⌛ [{_tag()}] {row['symbol']} · {why}")
 
     async def ensure_all(self) -> None:
         """Every open trade has a card (e.g. trades from before this feature, or after a restart)."""
@@ -290,7 +291,7 @@ class LiveCards:
                 for r in rows:
                     await self.sync(r["client_order_id"], prices)
             except Exception:  # noqa: BLE001 - never stop refreshing
-                log.warning("[ORB] live card refresh failed", exc_info=True)
+                log.warning("live card refresh failed", exc_info=True)
             await asyncio.sleep(every_s)
 
     async def refresh_closed(self, cid: str) -> None:

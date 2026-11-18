@@ -1,6 +1,6 @@
 # Step 2b: Bot fleet
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Planned (2026-11-18) · runs in parallel with the Step 2 strategy work, before Step 3
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
 
 **Goal:** turn the one-bot app into a fleet: **one bot per strategy**, each with its own brain, Discord identity and Alpaca paper account; a **head bot** that watches them all; one **market data service**; one **shared database**. The ORB bot keeps running, unchanged in behavior, the whole time.
 
@@ -38,13 +38,26 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: ⬜ Planned (2026-11-18) · runs in
 
 ## Sub-steps
 
-### 2b.1 Strategy interface
+### 2b.1 Strategy interface ✅
 The ORB bot's brain becomes **one strategy module behind a common contract**; everything else talks to the contract.
 - The contract: the strategy's id and tag; its schedule (pre-market time, check times, exit policy: flat by 3:55); how it builds its watchlist; how it **decides** at a check (no trigger / an entry with stop and target); how it generates signals over history for the backtest
 - `app/strategies/orb.py` holds today's ORB logic (focus list, `engine.decide`); the day routine, pipeline, backtest runner and Discord text become strategy-agnostic (`[ORB]` comes from the strategy's tag)
 - `python -m app backtest --strategy orb …`; `python -m app run` picks the strategy from `STRATEGY` (default `orb`)
 
 **Done when:** every existing test passes unchanged (the 16/16 Oct 19 match, the live = backtest test), **baseline run #1 reproduces exactly** (683 trades, −0.038R), and a small demo strategy can be backtested with `--strategy demo` without touching ORB code.
+
+**As built (2026-11-18):**
+- [app/strategies/base.py](../app/strategies/base.py): the `Brain` contract (schedule, live and historical watchlist, a pre-filter at each check, `decide`, the backtest's decision time)
+- [app/strategies/orb.py](../app/strategies/orb.py): `OrbBrain` wraps the ORB bot's existing code unchanged (focus list, the skill's ORB scan, `engine.decide`, the 9:51–11:31 checks)
+- [app/strategies/demo.py](../app/strategies/demo.py): a switched-off VWAP-reclaim demo brain that proves a second strategy plugs in
+- The day routine (`BotDay`, with `OrbDay` kept as an alias), pipeline, scheduler and backtest call the brain; `python -m app run` picks the bot from `STRATEGY` (default `orb`); `backtest` and `replay` take `--strategy`; a backtest only compares with its own strategy's baseline
+- Messages use the running bot's tag (`[ORB]` for ORB: identical text); log lines get the tag from the log format
+
+**ORB regression checks (all passed):**
+- Full test suite: 185 tests, including the 16/16 Oct 19 match and live = backtest
+- Baseline rerun (run #6) vs run #1: **identical on every number of all three views**, and **all 20,690 signals identical** (date, stock, trigger, entry, stop, target, shares, outcome, R, alerted, taken)
+- Live Yahoo path on today's data (TSLA, NVDA, AAPL): normal answers, ~0.2 s each
+- The demo strategy backtested all 512 days through the shared plumbing (run #7, tagged DEMO) without touching ORB code
 
 ### 2b.2 One codebase, many deployments
 - Per-bot settings from environment: `STRATEGY`, its own `DISCORD_BOT_TOKEN`, its own `ALPACA_*` keys; the shared channel ids stay the same

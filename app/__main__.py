@@ -21,7 +21,7 @@ from datetime import date, datetime, time as dtime
 from pathlib import Path
 
 from app import logs, market, paths, settings, strategies, tradelog
-from app.routine import DayData, LogAlerter, OrbDay
+from app.routine import BotDay, DayData, LogAlerter
 from app.scheduler import RealClock, SimClock, run_day, run_forever
 from app.state import AppState
 
@@ -54,9 +54,9 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
             break
         except Exception:  # noqa: BLE001
             if attempt == tries:
-                logging.getLogger("app").exception("[ORB] couldn't work out %s's results", day)
+                logging.getLogger("app").exception("couldn't work out %s's results", day)
                 return
-            logging.getLogger("app").warning("[ORB] results for %s failed (try %d), retrying in 10 min",
+            logging.getLogger("app").warning("results for %s failed (try %d), retrying in 10 min",
                                              day, attempt)
             await asyncio.sleep(600)
     if only_if_new and n == 0:
@@ -73,12 +73,12 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
             (focus_file.parent / "data_check.json").write_text(_json.dumps(check, indent=1))
             extra = afterclose.data_check_line(check)
         except Exception:  # noqa: BLE001 - the audit never blocks the summary
-            logging.getLogger("app").exception("[ORB] data check for %s failed", day)
+            logging.getLogger("app").exception("data check for %s failed", day)
     from app import costs as _costs
     try:                 # 1b.8: today's real paper trades, costs vs the backtest, the running total
         paper = _costs.day_section(trade_log, day, cost)
     except Exception:  # noqa: BLE001
-        logging.getLogger("app").exception("[ORB] paper-trade summary for %s failed", day)
+        logging.getLogger("app").exception("paper-trade summary for %s failed", day)
         paper = None
     extra = "\n\n".join(x for x in (paper, extra) if x) or None
     await post(afterclose.summary_text(trade_log, day, run_id=run_id, cost_pct=cost, scanned=scanned,
@@ -103,18 +103,18 @@ async def track_trades(bot, rules: dict) -> None:
                 await bot.post_trades(up.text)
                 await bot.note_on_alert(up.signal_id, up.line, up.state)
         except Exception:  # noqa: BLE001 - one bad event never stops tracking
-            lg.exception("[ORB] couldn't handle a trade update")
+            lg.exception("couldn't handle a trade update")
 
     while True:
         stream = TradingStream(al.api_key, al.secret_key, paper=True)
         stream.subscribe_trade_updates(on_update)
         try:
             await stream._run_forever()
-            lg.warning("[ORB] trade stream ended; restarting in 30 s")
+            lg.warning("trade stream ended; restarting in 30 s")
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            lg.exception("[ORB] trade stream failed; restarting in 30 s")
+            lg.exception("trade stream failed; restarting in 30 s")
         await asyncio.sleep(30)
 
 
@@ -129,7 +129,7 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
                          int(orb.settings.get("orders", {}).get("fill_timeout_seconds", 120)))
         rep = await asyncio.to_thread(rec.reconcile, session)
     except Exception:  # noqa: BLE001
-        lg.exception("[ORB] restart check failed")
+        lg.exception("restart check failed")
         return
     if rep.anything:
         await bot.post_system(rep.text())
@@ -148,7 +148,7 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         try:
             await bot.cards.ensure_all()          # every open trade has a card (also after a restart)
         except Exception:  # noqa: BLE001
-            lg.exception("[ORB] couldn't set up live trade cards")
+            lg.exception("couldn't set up live trade cards")
     for cid, wait in rep.recheck:                       # fill checks the restart interrupted
         async def later(cid=cid, wait=wait):
             await asyncio.sleep(max(wait, 0))
@@ -191,7 +191,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
             bot_task.result()          # login failed: raise the reason
         alerter = DiscordAlerter(bot, loop)
 
-        def make(day: str) -> OrbDay:
+        def make(day: str) -> BotDay:
             d = make_day(day, alerter)
             d.pause_source = lambda: state.paused
             return d
@@ -200,7 +200,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         await bot.post_system("🟢 **ORB bot online** · paper account · "
                               + ("**Approve places paper orders**" if orders_on else "alerts only, Approve just records")
                               + (" · ⏸️ still **paused** (`/resume` to turn alerts on)" if state.paused else ""))
-        async def after_close(day_bot: OrbDay) -> None:
+        async def after_close(day_bot: BotDay) -> None:
             try:                    # exits booked before their fill price was known get the real price
                 fixed = await asyncio.to_thread(bot.flattener.repair_exits, day_bot.day)
                 for cid, sym, old_px, new_px, pnl in fixed:
@@ -223,7 +223,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
         async def catch_up(day: str, session) -> None:
             await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)
 
-        async def flatten(day_bot: OrbDay, phase: str) -> None:
+        async def flatten(day_bot: BotDay, phase: str) -> None:
             rep = await asyncio.to_thread(bot.flattener.flatten, day_bot.day, phase)
             if rep.anything:
                 await (bot.post_system if bot.cards is not None else bot.post_trades)(rep.text())
@@ -282,15 +282,17 @@ def cmd_run(a) -> int:
     lock = single_instance()  # noqa: F841 - held until exit
     logs.setup()
     rules = settings.risk_rules()
-    orb = strategies.load("orb")
+    sid = os.environ.get("STRATEGY", "orb").strip().lower() or "orb"   # the bot this process runs
+    strategies.set_active(sid)
+    orb = strategies.load(sid)          # (named orb for history: it's whichever strategy STRATEGY says)
     al = settings.alpaca_settings()
     dcfg = settings.discord_settings()
     calendar = market.AlpacaCalendar(TradingClient(al.api_key, al.secret_key, paper=True))
     trade_log = tradelog.TradeLog()
     state = AppState(started_at=datetime.now(market.NY))
 
-    def make_day(day: str, alerter) -> OrbDay:
-        return OrbDay(orb, rules, trade_log, source="live", day=day, alerter=alerter,
+    def make_day(day: str, alerter) -> BotDay:
+        return BotDay(orb, rules, trade_log, source="live", day=day, alerter=alerter,
                       sec_user_agent=settings.sec_user_agent())
 
     try:
@@ -302,9 +304,10 @@ def cmd_run(a) -> int:
 
 
 def cmd_replay(a) -> int:
+    strategies.set_active(a.strategy)
     logs.setup()
     rules = settings.risk_rules()
-    orb = strategies.load("orb")
+    orb = strategies.load(a.strategy)
     day = date.fromisoformat(a.date)
     session = market.SkillCalendar().session(day)
     if session is None:
@@ -327,7 +330,7 @@ def cmd_replay(a) -> int:
         print("A replay from Yahoo needs --symbols (the focus list can't be rebuilt for a past day).")
         return 1
     alerter = LogAlerter()
-    day_bot = OrbDay(orb, rules, trade_log, source="replay", day=day.isoformat(), alerter=alerter,
+    day_bot = BotDay(orb, rules, trade_log, source="replay", day=day.isoformat(), alerter=alerter,
                      runs_root=runs_root, day_data=day_data, sec_user_agent=settings.sec_user_agent())
     clock = SimClock(datetime.combine(day, dtime(7, 0), tzinfo=market.NY))
     asyncio.run(run_day(day_bot, session, clock, simulated=True, focus=focus))
@@ -393,7 +396,7 @@ def cmd_backtest(a) -> int:
     from app.backtest import run as bt
     logs.setup()
     res = bt.run(date.fromisoformat(a.start), date.fromisoformat(a.end), label=a.label, overrides=a.set or [],
-                 progress=lambda m: logging.getLogger("app").info("[backtest] %s", m))
+                 progress=lambda m: logging.getLogger("app").info("[backtest] %s", m), strategy_id=a.strategy)
     m = res.headline
     print(f"\nRun #{res.run_id} ({res.label}): {m.get('trades', 0):,} trades, "
           f"{m.get('avg_r', 0):+.3f}R a trade after costs, total ${m.get('total_usd', 0):+,.0f}")
@@ -430,6 +433,7 @@ def main(argv=None) -> int:
     r.add_argument("--symbols", help="comma-separated focus list (default: every ticker in --offline)")
     r.add_argument("--db", help="trade log file (default data/replays.db)")
     r.add_argument("--discord", action="store_true", help="also post the alerts to #setups (marked REPLAY)")
+    r.add_argument("--strategy", default="orb", help="which strategy bot to replay (default: orb)")
     sm = sub.add_parser("summary", help="work out a day's results and print the summary")
     sm.add_argument("--date", required=True, help="YYYY-MM-DD")
     sm.add_argument("--source", default="live", choices=["live", "replay"])
@@ -443,6 +447,7 @@ def main(argv=None) -> int:
     bt.add_argument("--from", dest="start", required=True, help="YYYY-MM-DD")
     bt.add_argument("--to", dest="end", required=True, help="YYYY-MM-DD")
     bt.add_argument("--label", required=True, help='a name for the run, e.g. "baseline" or "1R target"')
+    bt.add_argument("--strategy", default="orb", help="which strategy bot to backtest (default: orb)")
     bt.add_argument("--set", action="append", metavar="KEY=VALUE",
                     help="change a setting for this run only, e.g. exit.target=1R, risk.max_trades_per_day=2, "
                          "selection.cash_limit=false (repeatable)")

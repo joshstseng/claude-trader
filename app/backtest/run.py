@@ -64,9 +64,9 @@ class RunResult:
 
 
 def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_path: Path = DB,
-        progress=print) -> RunResult:
-    orb = strategies.load("orb")
-    s, risk, sel = apply_overrides(orb.settings, settings.risk_rules(), list(overrides))
+        progress=print, strategy_id: str = "orb") -> RunResult:
+    strat = strategies.load(strategy_id)
+    s, risk, sel = apply_overrides(strat.settings, settings.risk_rules(), list(overrides))
     cost = s.get("costs", {}).get("pct_per_side", 0.0)
 
     data.prepare(start, end, s["focus_list"], progress=progress)
@@ -88,7 +88,7 @@ def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_pat
 
     log_db = tradelog.TradeLog(db_path)
     snapshot = {"strategy": s, "risk": risk, "selection": {**sel, **rules.__dict__}, "overrides": list(overrides)}
-    run_id = log_db.start_run("orb", "backtest", snapshot, label=label, date_from=start.isoformat(),
+    run_id = log_db.start_run(strategy_id, "backtest", snapshot, label=label, date_from=start.isoformat(),
                               date_to=end.isoformat())
     log_db.save_backtest(run_id, decisions)
     log_db.finish_run(run_id)
@@ -96,23 +96,23 @@ def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_pat
 
     baseline = None
     REPORTS.mkdir(parents=True, exist_ok=True)
-    for b in reversed(log_db.runs(strategy="orb", source="backtest")):
+    for b in reversed(log_db.runs(strategy=strategy_id, source="backtest")):
         bj = REPORTS / f"run-{b['id']}.json"
         if b["id"] != run_id and (b["label"] or "").lower() == "baseline" and bj.exists():
             baseline = (b["id"], b["label"], json.loads(bj.read_text())["headline"])
             break
     log_db.close()
 
-    w = s["scan_window"]
+    w = s.get("scan_window", {"start": "?", "end": "?"})
     settings_line = (f"**{start} → {end}** ({len(sessions)} market days) · focus top {s['focus_list']['top_n_by_dollar_volume']}"
                      f" + {s['focus_list']['max_daily_scan_hits']} daily-scan hits · window {w['start']}–{w['end']} · "
-                     f"volume ≥ {s.get('min_volume_x') or 'off'}× · stop {s['exit']['stop']} · target {s['exit']['target']} · "
+                     f"volume ≥ {s.get('min_volume_x') or 'off'}× · stop {s.get('exit', {}).get('stop', '?')} · target {s.get('exit', {}).get('target', '?')} · "
                      f"cap {rules.alert_cap} FCFS · max {rules.max_trades} trades/day · daily loss ${rules.max_daily_loss:,.0f} · "
                      f"cash limit {'on' if rules.cash_limit else 'off'} · costs {cost * 100:.2f}%/side · "
                      f"${risk['budget']:,} account, ${risk['max_loss_per_trade_usd']} max loss"
                      + (f" · overrides: {', '.join(overrides)}" if overrides else ""))
     why_not = Counter(d.why for d in decisions if not d.taken)
-    md = report.render(run_id=run_id, label=label, settings_line=settings_line, code=code, views=views,
+    md = report.render(run_id=run_id, label=label, tag=strat.tag, settings_line=settings_line, code=code, views=views,
                        traded=traded, every=every, why_not=why_not, baseline=baseline)
     path = REPORTS / f"run-{run_id}.md"
     path.write_text(md)

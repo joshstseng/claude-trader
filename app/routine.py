@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -41,7 +39,7 @@ class LogAlerter:
 
     def send(self, signal_id, result):
         p, o = result.plan or {}, result.order or {}
-        log.info("[ORB] ALERT %s  entry %.2f at %s  stop %.2f  target %.2f  %s shares",
+        log.info("ALERT %s  entry %.2f at %s  stop %.2f  target %.2f  %s shares",
                  result.symbol, p.get("entry", 0), p.get("entry_time"), p.get("stop", 0),
                  p.get("target", 0), o.get("qty"))
         self.sent.append((signal_id, result))
@@ -103,13 +101,15 @@ class TickReport:
     note: str | None = None
 
 
-class OrbDay:
+class BotDay:
+    """One trading day of one strategy bot. The strategy-specific parts (watchlist, candidates,
+    decision, schedule) come from its brain (app/strategies/); everything else is shared."""
+
     def __init__(self, strategy: Strategy, rules: dict, trade_log: tradelog.TradeLog, *,
                  source: str, day: str, alerter: Alerter, runs_root: Path = paths.RUNS_DIR,
                  day_data: DayData | None = None, sec_user_agent: str | None = None):
-        if strategy.id != "orb":
-            raise ValueError("OrbDay runs the ORB bot only")
         self.strategy, self.s, self.rules = strategy, strategy.settings, rules
+        self.brain, self.tag = strategy.brain, strategy.tag
         self.log, self.source, self.day = trade_log, source, day
         self.alerter, self.runs_root, self.day_data = alerter, runs_root, day_data
         self.sec_user_agent = sec_user_agent
@@ -128,11 +128,11 @@ class OrbDay:
             self.run_id = existing["id"]
             self.done = {r["symbol"] for r in trade_log.signals(run_id=self.run_id)}
             self.resumed = True
-            log.info("[ORB] resuming today's run %s (%d signals so far)", self.run_id, len(self.done))
+            log.info("resuming today's run %s (%d signals so far)", self.run_id, len(self.done))
         else:
             self.run_id = trade_log.start_run(
                 strategy.id, source, {"strategy": strategy.settings, "risk": rules},
-                label=f"ORB {source} {day}", date_from=day, date_to=day)
+                label=f"{self.tag} {source} {day}", date_from=day, date_to=day)
             self.resumed = False
 
     @property
@@ -159,39 +159,16 @@ class OrbDay:
                 focus = market.offline_symbols(self.day_data.bars)
             elif saved.exists():                     # restarted today: reuse today's list
                 focus = json.loads(saved.read_text())["symbols"]
-                log.info("[ORB] reusing today's focus list (%d stocks)", len(focus))
+                log.info("reusing today's focus list (%d stocks)", len(focus))
             else:
-                doc = market.build_focus_list(self.s["focus_list"], self.workdir / "focus.json")
-                focus = doc["symbols"]
-                log.info("[ORB] focus list: %d most traded + %d daily-scan hits (closes through %s, %ss)",
-                         len(doc["top"]), len(doc["daily_hits"]), doc["closes_through"], doc["seconds"])
+                focus, line = self.brain.watchlist_live(self.workdir)
+                log.info(line)
         self.focus = [s.upper() for s in focus]
         self.workdir.mkdir(parents=True, exist_ok=True)
         (self.workdir / "focus_symbols.json").write_text(json.dumps(self.focus))
         return self.focus
 
     # --------------------------------------------------------------------- check
-
-    def _orb_scan(self, symbols: list[str], now: str | None) -> tuple[list[dict], str | None]:
-        """The repo's ORB scan. Returns (hits in trigger order, note if it couldn't run)."""
-        folder = self.workdir / "_scan"
-        (folder / "trader").mkdir(parents=True, exist_ok=True)
-        (folder / "trader" / "config.json").write_text(json.dumps(self.rules))
-        args = [sys.executable, str(market.SCAN_PY), "orb", "--symbols", ",".join(symbols),
-                "--json", "--no-write", "--max-confirm", "0",
-                "--or-minutes", str(self.s["opening_range_minutes"]),
-                "--min-price", str(self.s["focus_list"]["min_price"])]
-        if now:
-            args += ["--now", now]
-        if self.day_data:
-            args += ["--offline", str(self.day_data.bars)]
-        p = subprocess.run(args, cwd=folder, capture_output=True, text=True, timeout=600)
-        try:
-            doc = json.loads(p.stdout)
-        except json.JSONDecodeError:
-            return [], (p.stderr.strip() or p.stdout.strip() or "scan failed").splitlines()[-1]
-        hits = sorted(doc.get("hits", []), key=lambda h: (h.get("bar_index", 0), h["symbol"]))  # trigger order
-        return hits, None
 
     def tick(self, now: str | None = None) -> TickReport:
         """One check. `now` = "YYYY-MM-DD HH:MM" New York for replays, None for live."""
@@ -201,14 +178,14 @@ class OrbDay:
         if not todo:
             report.note = "nothing left to check"
             return report
-        hits, note = self._orb_scan(todo, now)
+        cands, note = self.brain.candidates(todo, now, self.workdir, self.rules,
+                                            self.day_data.bars if self.day_data else None)
         if note:
             report.note = note
-            log.error("[ORB] check at %s couldn't scan: %s", report.at, note)   # pings you in #system
+            log.error("check at %s couldn't scan: %s", report.at, note)   # pings you in #system
             return report
-        report.candidates = [h["symbol"] for h in hits]
-        for h in hits:
-            sym = h["symbol"]
+        report.candidates = list(cands)
+        for sym in cands:
             if sym in self.done:
                 continue
             offline = self.day_data.offline_for(sym) if self.day_data else None
@@ -234,7 +211,7 @@ class OrbDay:
                 try:
                     channel_id, message_id = self.alerter.send(sid, result)
                 except Exception as e:  # noqa: BLE001 - a failed post is logged, the day goes on
-                    log.exception("[ORB] alert for %s failed", sym)
+                    log.exception("alert for %s failed", sym)
                     self.log.record_alert(sid, sent=False, held_reason=f"alert failed: {e}")
                     report.held.append((sym, f"alert failed: {e}"))
                     continue
@@ -243,10 +220,13 @@ class OrbDay:
             else:
                 self.log.record_alert(sid, sent=False, held_reason=reason)
                 report.held.append((sym, reason))
-        log.info("[ORB] check %s: %d above range, %d new signals, %d alerted, %d held",
+        log.info("check %s: %d candidates, %d new signals, %d alerted, %d held",
                  report.at, len(report.candidates), len(report.signals), len(report.alerted),
                  len(report.held))
         return report
 
     def finish(self) -> None:
         self.log.finish_run(self.run_id)
+
+
+OrbDay = BotDay   # the ORB bot's day (kept for older code and tests)
