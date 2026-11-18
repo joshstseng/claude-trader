@@ -62,18 +62,17 @@ def waiting_card(order, now: datetime, timeout_s: int = 120) -> tuple[str, str]:
     return title, body
 
 
-def live_card(order, signal, price: float | None, now: datetime, flat_by: dtime, events=()) -> tuple[str, str]:
-    """(title, body) while in the trade."""
+def live_card(order, signal, price: float | None, now: datetime, flat_by: dtime, events=()) -> tuple[str, str, float | None]:
+    """(title, body, unrealized $) while in the trade. The live P&L is the title, so it reads at a glance."""
     fill, qty = order["filled_price"], order["filled_qty"] or order["qty"]
     risk = (signal["entry"] - signal["stop"]) if signal else None
-    title = f"🟢 [ORB] {order['symbol']} · {qty} sh · in since {_et(order['filled_at'])} ET at {_m(fill)}"
-    lines = []
-    if price is not None and fill is not None:
-        pnl = (price - fill) * qty
+    pnl = (price - fill) * qty if price is not None and fill is not None else None
+    if pnl is not None:
         r = f" · {_r((price - fill) / risk)}" if risk else ""
-        lines.append(f"Now **{_m(price)}** · **{_signed(pnl)}**{r}")
+        title = f"{'🟢' if pnl >= 0 else '🔴'} [ORB] {order['symbol']} · {_signed(pnl)}{r}"
     else:
-        lines.append("Now: price unavailable")
+        title = f"⚪ [ORB] {order['symbol']} · P&L unavailable"
+    lines = [f"{qty} sh · in **{_m(fill)}** at {_et(order['filled_at'])} ET · now **{_m(price)}**"]
     block = [f"Stop    {_m(order['stop']):<10}" + (f" ({_pct(order['stop'], price)} away)" if price else ""),
              f"Target  {_m(order['target']):<10}" + (f" ({_pct(order['target'], price)} away)" if price else "")]
     lines.append("```\n" + "\n".join(block) + "\n```")
@@ -88,7 +87,7 @@ def live_card(order, signal, price: float | None, now: datetime, flat_by: dtime,
     if c:
         lines.append(f"Changes: {c}")
     lines.append(f"-# updated {now.astimezone(NY):%-I:%M %p} ET")
-    return title, "\n".join(lines)
+    return title, "\n".join(lines), pnl
 
 
 def closed_card(order, signal, events=(), backtest=None) -> tuple[str, str]:

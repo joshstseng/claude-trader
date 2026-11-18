@@ -136,19 +136,34 @@ class TradeTest(unittest.TestCase):
         self.assertEqual(title, "⏳ [ORB] TSLA · waiting for fill")
         self.assertIn("Limit **$366.12** · 6 sh · stop $358.32 · target $380.61", body)
 
-    def test_live_card(self):
+    def test_live_card_puts_the_pnl_in_the_title(self):
         self.fill(365.90)
         self.m.breakeven(self.cid)
         row, sig = self.log.order(self.cid), self.log.signal(self.sid)
         now = datetime(2026, 11, 19, 15, 45, tzinfo=timezone.utc)   # 10:45 AM ET
-        title, body = cards.live_card(row, sig, 368.40, now, dtime(15, 55), self.log.events(self.cid))
-        self.assertEqual(title, "🟢 [ORB] TSLA · 6 sh · in since 10:36 AM ET at $365.90")
-        self.assertIn("Now **$368.40** · **+$15.00** · +0.34R", body)       # 2.50 / 7.43 risk
+        title, body, pnl = cards.live_card(row, sig, 368.40, now, dtime(15, 55), self.log.events(self.cid))
+        self.assertEqual(title, "🟢 [ORB] TSLA · +$15.00 · +0.34R")         # 2.50 x 6; 2.50 / 7.43 risk
+        self.assertEqual(pnl, 15.0)
+        self.assertIn("6 sh · in **$365.90** at 10:36 AM ET · now **$368.40**", body)
         self.assertIn("Stop    $365.90    (−0.7% away)", body)
         self.assertIn("Target  $380.61    (+3.3% away)", body)
         self.assertIn("Sells at 3:55 PM ET (5h 10m)", body)
         self.assertIn("Changes: stop → break-even $358.32 → $365.90", body)
         self.assertNotIn("best", body.lower())                               # no best/worst move
+
+    def test_losing_trade_is_red(self):
+        self.fill(365.90)
+        row, sig = self.log.order(self.cid), self.log.signal(self.sid)
+        title, _, pnl = cards.live_card(row, sig, 363.00, datetime(2026, 11, 19, 15, 45, tzinfo=timezone.utc),
+                                        dtime(15, 55))
+        self.assertEqual(title, "🔴 [ORB] TSLA · −$17.40 · −0.39R")
+        self.assertLess(pnl, 0)
+
+    def test_system_confirmation_line(self):
+        from app.livecards import confirmation
+        line = confirmation("NET", "Stop moved: $287.80 → $300.00.")
+        self.assertTrue(line.startswith("🔧 **[ORB] NET** · Stop moved: $287.80 → $300.00 · "))
+        self.assertTrue(line.endswith(" ET"))
 
     def test_closed_card(self):
         self.fill(365.90)

@@ -77,10 +77,10 @@ class TradeButton(discord.ui.DynamicItem[discord.ui.Button], template=TRADE_RE):
             current = row[self.action] if row else None
             await interaction.response.send_modal(PriceModal(lc, self.cid, self.action, sym, current))
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()               # no reply in #live-trades: the card updates
         fn = lc.manager.cancel if self.action == "cancel" else lc.manager.breakeven
         res = await asyncio.to_thread(fn, self.cid)
-        await interaction.followup.send(("✅ " if res.ok else "⛔ ") + res.message, ephemeral=True)
+        await lc.report(interaction, sym, res)
         await lc.sync(self.cid)
 
 
@@ -96,7 +96,10 @@ class ConfirmClose(discord.ui.View):
         button.disabled = True
         await interaction.response.edit_message(content="Closing…", view=None)
         res = await asyncio.to_thread(self.lc.manager.close, self.cid)
-        await interaction.edit_original_response(content=("✅ " if res.ok else "⛔ ") + res.message)
+        await interaction.edit_original_response(content=("✅ Done." if res.ok else "⛔ " + res.message))
+        if res.ok:
+            row = self.lc.log.order(self.cid)
+            await self.lc.bot.post_system(confirmation(row["symbol"] if row else "?", res.message))
         await self.lc.sync(self.cid)
 
     @discord.ui.button(label="Keep it", style=discord.ButtonStyle.secondary)
@@ -120,11 +123,17 @@ class PriceModal(discord.ui.Modal):
         except ValueError:
             await interaction.response.send_message("⛔ That isn't a price.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()               # no reply in #live-trades: the card updates
         fn = self.lc.manager.move_stop if self.kind == "stop" else self.lc.manager.move_target
         res = await asyncio.to_thread(fn, self.cid, value)
-        await interaction.followup.send(("✅ " if res.ok else "⛔ ") + res.message, ephemeral=True)
+        row = self.lc.log.order(self.cid)
+        await self.lc.report(interaction, row["symbol"] if row else "?", res)
         await self.lc.sync(self.cid)
+
+
+def confirmation(sym: str, message: str) -> str:
+    """The #system line for a change you made, e.g. 🔧 [ORB] NET · Stop moved: $287.80 → $300.00 · 2:52 PM ET."""
+    return f"🔧 **[ORB] {sym}** · {message.rstrip('.')} · {datetime.now(NY):%-I:%M %p} ET"
 
 
 def waiting_view(cid: str) -> discord.ui.View:
@@ -150,6 +159,13 @@ class LiveCards:
         self.timeout, self.session_fn = fill_timeout_s, session_fn
         self._lock = asyncio.Lock()
 
+    async def report(self, interaction: discord.Interaction, sym: str, res) -> None:
+        """Done → one line in #system (and the card updates). Refused → a private reply with the reason."""
+        if res.ok:
+            await self.bot.post_system(confirmation(sym, res.message))
+        else:
+            await interaction.followup.send("⛔ " + res.message, ephemeral=True)
+
     def _flat_by(self) -> dtime:
         from app.afterclose import flat_by_for
         return flat_by_for(self.session_fn() if self.session_fn else None, self.rules)
@@ -171,8 +187,10 @@ class LiveCards:
         sig = self.log.signal(row["signal_id"])
         now = datetime.now(NY)
         if row["status"] == "filled":
-            title, body = cards.live_card(row, sig, price, now, self._flat_by(), self.log.events(row["client_order_id"]))
-            return discord.Embed(title=title, description=body, color=COLOR["live"]), live_view(row["client_order_id"])
+            title, body, pnl = cards.live_card(row, sig, price, now, self._flat_by(),
+                                               self.log.events(row["client_order_id"]))
+            color = COLOR["flat"] if pnl is None else COLOR["win"] if pnl >= 0 else COLOR["loss"]
+            return discord.Embed(title=title, description=body, color=color), live_view(row["client_order_id"])
         title, body = cards.waiting_card(row, now, self.timeout)
         return discord.Embed(title=title, description=body, color=COLOR["waiting"]), waiting_view(row["client_order_id"])
 
