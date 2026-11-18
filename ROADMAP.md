@@ -11,12 +11,12 @@
 ## Overview
 
 ```
-STEP 1a          STEP 1b              STEP 2           STEP 3          STEP 4         STEP 5
-Alerts      ──►  Approve → paper ──►  Backtest    ──►  Claude      ──► Hands-off ──►  Hands-off
-+ trade log      orders               (approve all)    filter +        on paper       real money
-                                                       backtest #2
-no orders        paper orders         no orders        paper orders    paper orders   real orders,
-                 you tap Approve                       you tap         no tap         tiny size
+STEP 1a          STEP 1b              STEP 2           STEP 2b          STEP 3          STEP 4         STEP 5
+Alerts      ──►  Approve → paper ──►  Backtest    ──►  Bot fleet   ──►  Claude      ──► Hands-off ──►  Hands-off
++ trade log      orders               (approve all)    (head, data,     filter (in      on paper       real money
+                                      + strategy work  shared DB)       head bot)
+no orders        paper orders         no orders        paper orders     paper orders    paper orders   real orders,
+                 you tap Approve                                        you tap         no tap         tiny size
 ```
 
 | Step | Name | Status |
@@ -24,7 +24,8 @@ no orders        paper orders         no orders        paper orders    paper ord
 | 1a | Alerts + trade log | 🟨 Built and live on Railway · 5-day live gate from Nov 18 |
 | 1b | One-tap approval → paper orders | 🟨 Built (1b.1–1b.7, 1b.8 part 1, 1b.9 live trade cards) · paper orders ON · gate: 2–3 weeks, ≥20 trades |
 | 2 | Backtest #1 (baseline) | 🟨 Framework done · baseline + 4 target runs · strategy variations next |
-| 3 | Claude filter + Backtest #2 | ⬜ Not started |
+| 2b | Bot fleet (strategy interface, shared DB, head bot, data service) | ⬜ Planned · next, alongside the Step 2 strategy work |
+| 3 | Claude filter + Backtest #2 | ⬜ Not started (built into the head bot) |
 | 4 | Hands-off on paper | ⬜ Not started |
 | 5 | Hands-off with real money | ⬜ Not started |
 
@@ -114,9 +115,19 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 ---
 
+## Step 2b: Bot fleet
+
+**What:** turn the one-bot app into a fleet: one bot per strategy (own brain, own Discord bot, own Alpaca paper account), a **head bot** that watches them all, one **market data service**, one **shared database**. The ORB bot keeps running unchanged throughout.
+
+**Plan:** [plans/step-2b-bot-fleet.md](plans/step-2b-bot-fleet.md). Diagram: [Trading Bot Fleet](https://claude.ai/artifact/CWdoipSXSR7AKbiqwQJhup). Sub-steps: strategy interface → one codebase, many deployments → shared database → head bot v1 → (when a 2nd strategy earns it) market data service → bot #2.
+
+**Gate:** the ORB bot behaves exactly as before on the new structure, and the head bot's watchdog and combined summary are live. Bot #2 joins only when a second strategy shows an edge in the backtest.
+
+---
+
 ## Step 3: Claude filter + Backtest #2
 
-**What:** add Claude as a filter that can only say no to a trade, then rerun the Step 2 backtest and compare.
+**What:** add Claude as a filter that can only say no to a trade, then rerun the Step 2 backtest and compare. It lives in the **head bot** (Step 2b), reviewing every bot's setups.
 
 *Not designed yet on purpose. We plan this step when we get here.*
 
@@ -128,7 +139,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 **What:** the approval tap turns off, and the risk check is the only gate. Discord becomes a feed of what happened, plus `/pause`, `/flatten` and a kill switch.
 
-**Likely includes:** alerts for when the app stops responding (it already runs on Railway since Step 1a).
+**Likely includes:** nothing new for uptime: the head bot's watchdog (Step 2b) already pings you when a bot stops responding.
 
 **Gate:** ~100+ hands-off trades with positive expected profit, matching the backtest, with no runaway bugs.
 
@@ -154,6 +165,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Backtests are repeatable and compared; the baseline has no Claude filter, and the filter is tested later |
 | 2026-11-17 | ~~Starts on the Mac; moves to a server by Step 4~~ → **Runs on Railway from Step 1a** (you didn't want to keep the Mac on). Trade log on a Railway volume |
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
+| 2026-11-18 | **Step 2b: Bot fleet** before Step 3: one bot per strategy (own brain, Discord bot and Alpaca paper account, shared channels), a head bot (summary, watchdog, global limits; later the Claude filter), a market data service (not a Discord bot) and a shared Postgres database. Every trading bot stays safe on its own. Bot #2 only once a second strategy backtests well |
 | 2026-11-18 | **Live trade management** in Discord: `#live-trades` (one updating card per trade, buttons; stops only move up) and `#closed-trades` (renamed `#trades`, @mention on close). Resolved alerts in `#setups` collapse to one grey line with an ET timestamp |
 | 2026-11-17 | Step 1b uses **free live data only** (measure Alpaca IEX vs Yahoo first; TradingView CME/COMEX can't be used: futures, no API) and moves the live bot onto the **backtest's engine** |
 | 2026-11-17 | Backtest baseline and Step 1b both use a **cash limit**: the $5k account can't use margin, so usually one ~$3.5k position at a time |
