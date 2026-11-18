@@ -92,5 +92,12 @@ Backtest said: ✅ +2.00R          (added after the 4:15 PM step)
 - **Tested on the real paper account** (1-share F position): stop down refused; stop up and target moved at Alpaca with the new leg ids saved; target below the price refused; Close cancelled both legs and sold, leaving nothing open. Plus 12 automated tests
 - Without `DISCORD_CHANNEL_LIVE_TRADES`, the app falls back to the old behavior
 
+**Tweaks after first use (2026-11-18, all buttons tested live on CMG/NET):**
+- The **live P&L is the card's title** (`🟢 [ORB] NET · +$21.33 · +0.47R`), with a green/red color bar
+- Button labels: Close now · Break-even · Move stop · Move target (no "…")
+- Successful changes post one line to **`#system`** (`🔧 [ORB] NET · Stop moved: $287.80 → $300.00 · 2:56 PM ET`) instead of replying in `#live-trades`; refusals still answer privately
+- Close now's confirm message deletes itself afterwards
+- Fixed: Discord refuses form labels over 45 characters (Move stop/target timed out)
+
 ## Setup (done by you 2026-11-18)
 - **You:** rename `#trades` → `#closed-trades`, create **`#live-trades`**, then add `DISCORD_CHANNEL_LIVE_TRADES=<id>` to your local `.env` **and** to Railway's Variables. Suggested notifications: `#live-trades` → Nothing or @mentions only (updates are silent anyway); `#closed-trades` → @mentions.
