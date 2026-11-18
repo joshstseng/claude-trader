@@ -35,8 +35,8 @@ class TradeButton(discord.ui.DynamicItem[discord.ui.Button], template=TRADE_RE):
     STYLE = {"cancel": ("Cancel order", discord.ButtonStyle.danger),
              "close": ("Close now", discord.ButtonStyle.danger),
              "be": ("Break-even", discord.ButtonStyle.primary),
-             "stop": ("Move stop…", discord.ButtonStyle.secondary),
-             "target": ("Move target…", discord.ButtonStyle.secondary)}
+             "stop": ("Move stop", discord.ButtonStyle.secondary),
+             "target": ("Move target", discord.ButtonStyle.secondary)}
 
     def __init__(self, action: str, cid: str):
         self.action, self.cid = action, cid

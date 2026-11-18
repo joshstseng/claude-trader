@@ -44,7 +44,7 @@ Stop   $358.32  (−2.7% away)
 Target $380.61  (+3.3% away)
 Sells at 3:55 PM ET (5h 19m)
 Changes: stop → break-even $365.90 (10:52 AM)
-[ Close now ] [ Break-even ] [ Move stop… ] [ Move target… ]
+[ Close now ] [ Break-even ] [ Move stop ] [ Move target ]
 ```
 
 **The final card in `#closed-trades`** (with an @mention):
@@ -62,8 +62,8 @@ Backtest said: ✅ +2.00R          (added after the 4:15 PM step)
 | **Cancel order** (waiting) | Cancels the unfilled entry; nothing bought, not counted | already filled |
 | **Close now** | Two taps ("Close TSLA? **Confirm**", expires after 30 s) → cancels the stop/target, sells at market, books a **manual** exit | already closed |
 | **Break-even** | Moves the stop to your entry fill | the price is at or below your entry (the stop would trigger immediately), or the stop is already there or higher |
-| **Move stop…** | A small Discord form: type the new stop | it's **lower** than the current stop (stops only move up), or not below the current price |
-| **Move target…** | A small Discord form: type the new target | it's not above the current price |
+| **Move stop** | A small Discord form: type the new stop | it's **lower** than the current stop (stops only move up), or not below the current price |
+| **Move target** | A small Discord form: type the new target | it's not above the current price |
 
 - Changes are made **on the bracket at Alpaca** (the stop and target legs are modified in place), so the trade stays protected the whole time
 - Every change is **logged** (time, old → new) in a new trade-events record, shown on the card and the final card, and kept for later analysis ("did manual changes help?")
@@ -80,7 +80,7 @@ Backtest said: ✅ +2.00R          (added after the 4:15 PM step)
 | 1b.9.2 | **Card lifecycle**: posted on Approve (and the `#setups` alert collapses with a link), updated on fill, deleted from `#live-trades` and posted to `#closed-trades` on close, with an @mention. Card message ids saved, so a restart resumes updating them | A paper trade's card goes waiting → live → closed on its own |
 | 1b.9.3 | **Minute updates**: price, unrealized $ and R, distances, time left; silent edits | Cards refresh every ~60 s without pinging |
 | 1b.9.4 | **Cancel + Close now** (two-tap confirm) | Tested on the real paper account with a test position |
-| 1b.9.5 | **Break-even, Move stop…, Move target…**: Discord forms, the safety rules, changes on Alpaca's bracket legs, logged | Each rule refuses what it should; the change shows at Alpaca and on the card |
+| 1b.9.5 | **Break-even, Move stop, Move target**: Discord forms, the safety rules, changes on Alpaca's bracket legs, logged | Each rule refuses what it should; the change shows at Alpaca and on the card |
 | 1b.9.6 | **Rewire existing messages**: fills, stops, targets, the 3:55 sell, `/flatten` and restart results go to the cards (no more event spam); daily summaries unchanged | `#closed-trades` only has final cards |
 | 1b.9.7 | **After the close**: the 4:15 PM step adds "Backtest said…" to each closed card | Closed cards show live vs backtest |
 
