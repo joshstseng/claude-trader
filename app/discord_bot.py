@@ -205,7 +205,7 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
                 trade_log.record_response(self.signal_id, self.action, user_id=interaction.user.id)
             label = "⏭️ Skipped" if self.action == "skip" else "📝 Took it"
             await interaction.response.edit_message(
-                content=resolved_content(f"{label} {now:%-I:%M %p}", "done", original), embeds=[], view=None)
+                content=resolved_content(stamp(label, now), "done", original), embeds=[], view=None)
             return
 
         await interaction.response.defer()               # placing an order can take a few seconds
@@ -227,7 +227,8 @@ class DecisionButton(discord.ui.DynamicItem[discord.ui.Button], template=BUTTON_
             return
         # resolved: the @mention and the card go; an order in flight stays a normal line, the rest collapse
         await interaction.edit_original_response(
-            content=resolved_content(out.line, out.state, original if out.state == "done" and not out.placed else None),
+            content=resolved_content(stamp(out.line, now), out.state,
+                                     original if out.state == "done" and not out.placed else None),
             embeds=[], view=None)
         if out.placed and out.client_id:
             bot.follow_entry(interaction.message, out.client_id)
@@ -274,6 +275,16 @@ def resolved_content(line: str, state: str, original: str | None = None) -> str:
     if state == "done":
         return ("-# " + text.replace("**", ""))[:1990]
     return text[:1990]
+
+
+def stamp(line: str, when: datetime) -> str:
+    """Put the time you tapped into a resolved alert's line (New York time, like the alerts)."""
+    from app.market import NY
+    t = when.astimezone(NY).strftime("%-I:%M %p") + " ET"
+    for word in ("Approved", "Not placed", "order sent", "Skipped", "Took it"):
+        if word in line:
+            return line.replace(word, f"{word} {t}", 1)
+    return f"{line} · {t}"
 
 
 def is_active_alert(msg: discord.Message) -> bool:

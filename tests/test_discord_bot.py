@@ -177,3 +177,20 @@ class ResolvedAlertTest(unittest.TestCase):
         self.assertFalse(discord_bot.is_active_alert(locked))
         self.assertIsNone(discord_bot.chosen_on_old_alert(active))
         self.assertEqual(discord_bot.chosen_on_old_alert(locked), "Approved")
+
+
+class StampTest(unittest.TestCase):
+    """The time you tapped, in New York time, on every resolved alert."""
+    WHEN = datetime(2026, 11, 18, 19, 24, tzinfo=timezone.utc)          # 2:24 PM ET
+
+    def test_approve_skip_and_refusals_get_the_time(self):
+        self.assertEqual(discord_bot.stamp("📝 Approved (test alert: no order placed)", self.WHEN),
+                         "📝 Approved 2:24 PM ET (test alert: no order placed)")
+        self.assertEqual(discord_bot.stamp("⏭️ Skipped", self.WHEN), "⏭️ Skipped 2:24 PM ET")
+        self.assertEqual(discord_bot.stamp("⛔ Not placed (stale)", self.WHEN), "⛔ Not placed 2:24 PM ET (stale)")
+        self.assertEqual(discord_bot.stamp("⏳ **[ORB] TSLA** · order sent: buy 6", self.WHEN),
+                         "⏳ **[ORB] TSLA** · order sent 2:24 PM ET: buy 6")
+
+    def test_server_time_zone_doesnt_matter(self):
+        """Railway runs in UTC; the stamp must still be New York time."""
+        self.assertIn("2:24 PM ET", discord_bot.stamp("⏭️ Skipped", self.WHEN.astimezone()))

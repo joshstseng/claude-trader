@@ -74,7 +74,7 @@ class OrderDesk:
                 self.log.record_response(signal_id, "took", user_id=user_id)
             return Outcome(False, "📝 Test/replay alert: approval noted, **no order is placed**. On a live "
                                   "alert this would run the stale check, the risk check and send the bracket order.",
-                           line="📝 Test alert approved (no order placed)", state="done")
+                           line="📝 Approved (test alert: no order placed)", state="done")
         if sig is None:
             return Outcome(False, "⛔ I can't find that signal in the log.")
         if self.pause_source and self.pause_source():
