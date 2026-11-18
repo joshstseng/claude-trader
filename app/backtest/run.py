@@ -22,8 +22,8 @@ from app.backtest import data, report, signals
 from app.backtest.select import Rules, select
 
 log = logging.getLogger(__name__)
-DB = paths.DATA_DIR / "backtests.db"
-REPORTS = paths.DATA_DIR / "backtests"
+DB = paths.SHARED_DATA_DIR / "backtests.db"
+REPORTS = paths.SHARED_DATA_DIR / "backtests"
 
 
 def apply_overrides(strategy_settings: dict, risk: dict, overrides: list[str]) -> tuple[dict, dict, dict]:

@@ -1,6 +1,6 @@
 # Step 2b: Bot fleet
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
 
 **Goal:** turn the one-bot app into a fleet: **one bot per strategy**, each with its own brain, Discord identity and Alpaca paper account; a **head bot** that watches them all; one **market data service**; one **shared database**. The ORB bot keeps running, unchanged in behavior, the whole time.
 
@@ -59,12 +59,19 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - Live Yahoo path on today's data (TSLA, NVDA, AAPL): normal answers, ~0.2 s each
 - The demo strategy backtested all 512 days through the shared plumbing (run #7, tagged DEMO) without touching ORB code
 
-### 2b.2 One codebase, many deployments
+### 2b.2 One codebase, many deployments ✅ *(prepared without a second bot)*
 - Per-bot settings from environment: `STRATEGY`, its own `DISCORD_BOT_TOKEN`, its own `ALPACA_*` keys; the shared channel ids stay the same
 - Storage and log paths, card ids and button ids namespaced by bot, so two bots never touch each other's state
 - A setup guide for adding a bot: Discord app, Alpaca paper account, Railway service (~20 minutes of clicking)
 
-**Done when:** the ORB bot on Railway runs exactly as before with `STRATEGY=orb`, and a second local config (demo strategy, another Discord bot, another paper account) runs side by side in a test.
+**Done when:** the ORB bot on Railway runs exactly as before with `STRATEGY=orb`, and tests prove a second bot's storage, orders and messages can't collide with the ORB bot's. *(Changed 2026-11-18: no second Discord bot or Alpaca account is needed yet; no strategy is ready. The real second bot is 2b.6, after the head bot.)*
+
+**As built (2026-11-18):**
+- Storage is per bot ([app/paths.py](../app/paths.py)): the ORB bot keeps its original layout (so nothing moves on Railway); any other bot gets `bots/<id>/data|runs|logs` (trade log, pause setting, day account, cards, logs, single-copy lock). Shared on purpose: the market data cache, the stock list, backtest runs and reports
+- The bot identity (`STRATEGY`) drives storage, the tag in logs, and the strategy the app runs; order ids start with the strategy id (`orb-…`)
+- [plans/add-a-bot.md](add-a-bot.md): the checklist for adding a bot (its brain, Discord bot, Alpaca paper account, Railway service)
+
+**ORB regression checks (all passed):** 192 tests (new: the ORB bot's storage paths are exactly the ones it has always used on Railway; another bot's are separate; shared data is shared); baseline rerun run #8 = run #1 on all 20,690 signals; live Yahoo path normal
 
 ### 2b.3 Shared database
 - Railway Postgres; the trade log works on Postgres (and still on SQLite for local tests and backtests)

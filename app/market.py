@@ -19,7 +19,7 @@ from app import paths
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
 SCAN_PY = paths.SKILL_DIR / "trader-scanner" / "scan.py"
-SCANNER_DIR = paths.DATA_DIR / "scanner"          # universe.txt lives here
+SCANNER_DIR = paths.SHARED_DATA_DIR / "scanner"          # universe.txt lives here
 UNIVERSE_FILE = SCANNER_DIR / "trader" / "universe.txt"
 UNIVERSE_MAX_AGE_DAYS = 7
 

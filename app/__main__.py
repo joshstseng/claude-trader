@@ -62,7 +62,7 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
     if only_if_new and n == 0:
         return          # catch-up after a restart: nothing new, the summary was already posted
     extra = None
-    focus_file = paths.RUNS_DIR / day / "orb" / "focus_symbols.json"
+    focus_file = paths.RUNS_DIR / day / strategies.active_id() / "focus_symbols.json"
     if scanned and focus_file.exists() and session is not None:
         try:             # 1b.1 live audit: would full-market data have given the same signals?
             import json as _json

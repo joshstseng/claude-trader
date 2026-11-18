@@ -55,7 +55,7 @@ def tag_for(strategy_id: str) -> str:
 
 
 # The bot this process runs (one bot per process). Messages and logs use its tag.
-_active = {"id": "orb"}
+_active = {"id": paths.BOT_ID if paths.BOT_ID in BRAINS else "orb"}   # STRATEGY, default orb
 
 
 def set_active(strategy_id: str) -> None:

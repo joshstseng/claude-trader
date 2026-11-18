@@ -24,7 +24,7 @@ no orders        paper orders         no orders        paper orders     paper or
 | 1a | Alerts + trade log | 🟨 Built and live on Railway · 5-day live gate from Nov 18 |
 | 1b | One-tap approval → paper orders | 🟨 Built (1b.1–1b.7, 1b.8 part 1, 1b.9 live trade cards) · paper orders ON · gate: 2–3 weeks, ≥20 trades |
 | 2 | Backtest #1 (baseline) | 🟨 Framework done · baseline + 4 target runs · strategy variations next |
-| 2b | Bot fleet (strategy interface, shared DB, head bot, data service) | 🟨 2b.1 strategy interface ✅ · 2b.2 next |
+| 2b | Bot fleet (strategy interface, shared DB, head bot, data service) | 🟨 2b.1 strategy interface ✅ · 2b.2 per-bot config ✅ · 2b.3 shared database next |
 | 3 | Claude filter + Backtest #2 | ⬜ Not started (built into the head bot) |
 | 4 | Hands-off on paper | ⬜ Not started |
 | 5 | Hands-off with real money | ⬜ Not started |

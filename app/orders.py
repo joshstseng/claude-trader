@@ -131,7 +131,7 @@ class OrderDesk:
 
         # 4. one order
         qty = int(sizing["qty"])
-        client_id = f"orb-{sig['date']}-{signal_id}"
+        client_id = f"{sig['strategy']}-{sig['date']}-{signal_id}"   # e.g. orb-2026-11-19-12
         try:
             info = self.broker.bracket_buy(sym, qty, limit, stop, target, client_id)
         except Exception as e:  # noqa: BLE001 - Alpaca refused it: say why, place nothing

@@ -28,7 +28,7 @@ from app.market import Session
 from app.outcomes import NY, Bar
 
 log = logging.getLogger(__name__)
-CACHE = paths.DATA_DIR / "bars"
+CACHE = paths.SHARED_DATA_DIR / "bars"
 DAILY_DIR, M5_DIR, FOCUS_DIR = CACHE / "1d", CACHE / "5m", CACHE / "focus"
 CAL_FILE = CACHE / "calendar.json"
 DAILY_BATCH, M5_BATCH = 200, 100
