@@ -1,6 +1,6 @@
 # Step 1b: One-tap approval → paper orders
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1–1b.6 ✅ · paper orders ON since 2026-11-17)
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1–1b.7 ✅ · paper orders ON since 2026-11-17 · 1b.8 needs ~20 real fills)
 
 **Goal:** tapping **[Approve]** on an alert places a real bracket order (entry + stop + target) on your Alpaca **paper** account. The bot tracks it to the end, flattens by 3:55 PM, and records real fill prices so we know what trading actually costs.
 
@@ -104,11 +104,18 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1–1b.6 ✅ �
 - **`/flatten confirm:yes`**: kill switch: closes everything now and pauses (no alerts or approvals until `/resume`); approvals are refused while paused
 - Tested with a fake Alpaca (sold, stopped earlier, never filled, left open → ping, kill switch, 3:55/3:58 and 12:55/12:58 timing) and the real paper account's position/order calls
 
-### 1b.7 Restart safety
+### 1b.7 Restart safety ✅
 - On startup: read open orders and positions from Alpaca and match them to today's signals; resume tracking, never place duplicates
 - A redeploy mid-trade loses nothing: stops and targets stay at Alpaca the whole time
 
 **Done when:** killing and restarting the app with an open position resumes tracking and still flattens at 3:55.
+
+**As built** ([app/reconcile.py](../app/reconcile.py)): on every start the app lines up its books with Alpaca and posts a 🔄 restart check to `#system` when there's something to say:
+- entry filled while down → booked with the real fill; stop/target hit while down → exit booked from the bracket legs, posted to `#trades`
+- entry still waiting → cancelled if its 2 minutes are up, otherwise its fill check is rescheduled
+- held while the market is closed (a missed 3:55 flatten) → sells queued for the next open + ping; a position not in today's books → ping
+- an open, protected position mid-morning just resumes (the trade stream picks it back up); between 3:55 and the close, the scheduler's flatten runs immediately
+- Tested with a fake Alpaca (8 cases) and against the real (empty) paper account; deployed 2026-11-17, clean start
 
 ### 1b.8 Measured costs
 - Daily summary gains the real numbers: fills vs plan, slippage per trade, measured cost in R
