@@ -109,7 +109,9 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
             d.pause_source = lambda: state.paused
             return d
 
-        await bot.post_system("🟢 **ORB bot online** · paper · alerts only, no orders (Step 1a)"
+        orders_on = bool(orb.settings.get("orders", {}).get("enabled"))
+        await bot.post_system("🟢 **ORB bot online** · paper account · "
+                              + ("**Approve places paper orders**" if orders_on else "alerts only, Approve just records")
                               + (" · ⏸️ still **paused** (`/resume` to turn alerts on)" if state.paused else ""))
         async def after_close(day_bot: OrbDay) -> None:
             await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
