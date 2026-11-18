@@ -271,6 +271,7 @@ class TraderBot(discord.Client):
         self.desk = None            # app.orders.OrderDesk (live app only): Approve -> paper order
         self.flattener = None       # app.flatten.Flattener (live app only): /flatten and 3:55 PM
         self.broker = None          # app.broker.AlpacaPaper (live app only): /positions
+        self.assumed_cost = 0.0003  # the backtest's assumed cost per side (for /pnl)
         self._add_commands()
 
     def trade_log(self, source: str) -> tradelog.TradeLog:
@@ -384,6 +385,14 @@ class TraderBot(discord.Client):
         async def positions(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True)
             await interaction.followup.send(await asyncio.to_thread(self.positions_text), ephemeral=True)
+
+        @tree.command(name="pnl", description="Paper trading P&L: all-time total, recent days, measured costs")
+        @app_commands.check(lambda i: i.user.id == self.cfg.owner_id)
+        async def pnl(interaction: discord.Interaction):
+            from app import costs
+            await interaction.response.defer(ephemeral=True)
+            text = await asyncio.to_thread(costs.pnl_text, self.trade_log("live"), self.assumed_cost)
+            await interaction.followup.send(text[:1990], ephemeral=True)
 
         @tree.command(name="flatten", description="KILL SWITCH: close every position and order now, then pause")
         @app_commands.describe(confirm='type "yes" to close everything now')

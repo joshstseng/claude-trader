@@ -117,11 +117,17 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (1b.1–1b.7 ✅ �
 - an open, protected position mid-morning just resumes (the trade stream picks it back up); between 3:55 and the close, the scheduler's flatten runs immediately
 - Tested with a fake Alpaca (8 cases) and against the real (empty) paper account; deployed 2026-11-17, clean start
 
-### 1b.8 Measured costs
+### 1b.8 Measured costs *(part 1 ✅ · part 2 waits for ~20 fills)*
 - Daily summary gains the real numbers: fills vs plan, slippage per trade, measured cost in R
 - After ~20+ fills: compare with the backtest's assumed 0.03%/side, update `costs.pct_per_side`, and rerun the key backtests with the real cost
 
 **Done when:** the measured cost is in the backtest settings and the baseline has been rerun with it.
+
+**Part 1, built 2026-11-17** ([app/costs.py](../app/costs.py)): cost is measured against **the backtest's own result for the same plan on the same day** (the 4:15 outcome engine, before costs): cost per share = backtest P&L/share − real P&L/share, which converts straight into the backtest's `pct_per_side`. It captures slippage on both ends and any difference in how the trade played out.
+- Daily summary: a **"Paper trades (real fills)"** section: each trade's real in/out, P&L and R next to what the backtest said; limits that never filled (and what they would have done); today's P&L and the **all-time paper P&L**; a 💸 costs line (fill rate, entry and stop slippage, real cost vs the assumed 0.03%/side)
+- **`/pnl`**: all-time total, the last 10 days, measured costs so far, and how many of the ~20 needed trades exist
+
+**Part 2 (after ~20 closed paper trades):** set `costs.pct_per_side` to the measured value (plus a small cushion, since paper fills are simulated and kinder than real ones), rerun the baseline and 1R backtests, and compare.
 
 ---
 

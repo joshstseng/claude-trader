@@ -74,6 +74,13 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
             extra = afterclose.data_check_line(check)
         except Exception:  # noqa: BLE001 - the audit never blocks the summary
             logging.getLogger("app").exception("[ORB] data check for %s failed", day)
+    from app import costs as _costs
+    try:                 # 1b.8: today's real paper trades, costs vs the backtest, the running total
+        paper = _costs.day_section(trade_log, day, cost)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("app").exception("[ORB] paper-trade summary for %s failed", day)
+        paper = None
+    extra = "\n\n".join(x for x in (paper, extra) if x) or None
     await post(afterclose.summary_text(trade_log, day, run_id=run_id, cost_pct=cost, scanned=scanned,
                                        extra=extra))
 
@@ -148,6 +155,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     bot.desk = OrderDesk(tradelog.TradeLog(), broker, orb.settings, rules)   # Approve -> paper order
     bot.desk.pause_source = lambda: state.paused
     bot.flattener = Flattener(broker, tradelog.TradeLog(), rules)            # 3:55 PM and /flatten
+    bot.assumed_cost = orb.settings.get("costs", {}).get("pct_per_side", 0.0)   # for /pnl
     loop = asyncio.get_running_loop()
     me = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):
