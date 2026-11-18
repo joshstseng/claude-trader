@@ -135,6 +135,22 @@ class DayAccount:
             self._save()
             return p
 
+    def correct_exit(self, symbol: str, price: float) -> Position | None:
+        """Fix the price of a symbol's latest closed position (booked before its fill was known)."""
+        with _lock:
+            closed = [p for p in self.positions if p.symbol == symbol.upper() and p.status == "closed"]
+            if not closed:
+                return None
+            p = closed[-1]
+            p.exit_price = price
+            p.pnl = round((price - p.entry_price) * p.qty, 2)
+            for r in reversed(self.records):
+                if r["symbol"] == p.symbol and r["kind"] == "exit":
+                    r["price"], r["pnl"] = price, p.pnl
+                    break
+            self._save()
+            return p
+
     # ------------------------------------------------------------------ files
 
     def _save(self) -> None:

@@ -293,6 +293,23 @@ class LiveCards:
                 log.warning("[ORB] live card refresh failed", exc_info=True)
             await asyncio.sleep(every_s)
 
+    async def refresh_closed(self, cid: str) -> None:
+        """Re-render a closed card (e.g. after its exit price was corrected), keeping the @mention."""
+        row = self.log.order(cid)
+        if row is None or not row["closed_card_message_id"]:
+            return
+        ch = await self._channel(self.closed_channel)
+        try:
+            msg = await ch.fetch_message(int(row["closed_card_message_id"]))
+        except discord.NotFound:
+            return
+        sig = self.log.signal(row["signal_id"])
+        head, body = cards.closed_card(row, sig, self.log.events(cid), self.log.outcome(row["signal_id"]))
+        pnl = row["pnl_usd"] or 0
+        color = COLOR["win"] if pnl > 0 else COLOR["loss"] if pnl < 0 else COLOR["flat"]
+        await msg.edit(content=f"<@{self.bot.cfg.owner_id}> {head}",
+                       embed=discord.Embed(description=body, color=color))
+
     async def add_backtest_lines(self, day: str) -> None:
         """After the 4:15 step: each closed card gets 'Backtest said…'."""
         rows = self.log.db.execute(

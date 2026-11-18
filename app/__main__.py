@@ -201,6 +201,16 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                               + ("**Approve places paper orders**" if orders_on else "alerts only, Approve just records")
                               + (" · ⏸️ still **paused** (`/resume` to turn alerts on)" if state.paused else ""))
         async def after_close(day_bot: OrbDay) -> None:
+            try:                    # exits booked before their fill price was known get the real price
+                fixed = await asyncio.to_thread(bot.flattener.repair_exits, day_bot.day)
+                for cid, sym, old_px, new_px, pnl in fixed:
+                    old_txt = f"${old_px:,.2f}" if old_px is not None else "unknown"
+                    await bot.post_system(f"🩹 Corrected {sym}'s exit: {old_txt} → ${new_px:,.2f} "
+                                          f"(P&L {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f})")
+                    if bot.cards is not None:
+                        await bot.cards.refresh_closed(cid)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("app").exception("couldn't repair today's exits")
             await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
                                       run_id=day_bot.run_id,
                                       scanned=day_bot.scanned_today)

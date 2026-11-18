@@ -85,9 +85,31 @@ class AlpacaPaper:
         """Cancel every open order and sell every position at market. [(symbol, close order id)]."""
         out = []
         for r in self.trading.close_all_positions(cancel_orders=True) or []:
-            body = getattr(r, "body", None)
-            out.append((r.symbol, str(body.id) if getattr(body, "id", None) else None))
+            # Alpaca puts the sell's id in order_id; the nested body isn't always parsed as an Order
+            oid = getattr(r, "order_id", None) or getattr(getattr(r, "body", None), "id", None)
+            out.append((r.symbol, str(oid) if oid else None))
         return out
+
+    def last_sell_fill(self, symbol: str, after: str | None = None) -> tuple[float, str] | None:
+        """(average price, filled at ISO) of the latest filled SELL in a symbol, optionally after a time.
+        Used to repair an exit that was booked before its fill price was known."""
+        from datetime import datetime
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        since = None
+        if after:
+            try:
+                since = datetime.fromisoformat(str(after).replace("Z", "+00:00"))
+            except ValueError:
+                since = None
+        req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, symbols=[symbol], after=since, limit=50)
+        best = None
+        for o in self.trading.get_orders(req):
+            if getattr(o.side, "value", o.side) != "sell" or not o.filled_avg_price or not o.filled_at:
+                continue
+            if best is None or o.filled_at > best[1]:
+                best = (float(o.filled_avg_price), o.filled_at)
+        return (best[0], best[1].isoformat()) if best else None
 
     def fill_of(self, broker_id: str) -> tuple[str, float | None]:
         """(status, filled average price) of one order."""

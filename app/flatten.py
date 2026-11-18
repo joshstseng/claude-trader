@@ -64,9 +64,10 @@ class FlattenReport:
 
 class Flattener:
     def __init__(self, broker, trade_log: tradelog.TradeLog, rules: dict, *, runs_root: Path = paths.RUNS_DIR,
-                 fill_wait_s: float = 10.0, now=lambda: datetime.now(NY)):
+                 fill_wait_s: float = 10.0, recheck_s: float = 10.0, now=lambda: datetime.now(NY)):
         self.broker, self.log, self.rules, self.runs_root = broker, trade_log, rules, runs_root
         self.fill_wait_s, self.now = fill_wait_s, now
+        self.recheck_s = recheck_s
 
     def flatten(self, day: str, phase: str = "flat") -> FlattenReport:
         rep = FlattenReport(phase)
@@ -115,15 +116,49 @@ class Flattener:
             rep.alert_updates.append((pos.signal_id, f"{ICON.get(reason, '•')} [ORB] {pos.symbol} · {words} at "
                                                      f"${price:,.2f} · {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f}", "done"))
 
-        # anything Alpaca still holds (or still has orders for) after all that
-        try:
-            rep.still_open = sorted({p["symbol"] for p in self.broker.positions()} |
-                                    {o.client_id for o in self.broker.open_orders()})
-        except Exception as e:  # noqa: BLE001
-            rep.problems.append(f"couldn't re-check Alpaca: {str(e)[:120]}")
+        # anything Alpaca still holds (or still has orders for) after all that. Sells that are still
+        # filling look "open" for a moment, so re-check for a few seconds before calling it a problem.
+        deadline = time.monotonic() + self.recheck_s
+        while True:
+            try:
+                rep.still_open = sorted({p["symbol"] for p in self.broker.positions()} |
+                                        {o.client_id for o in self.broker.open_orders()})
+            except Exception as e:  # noqa: BLE001
+                rep.problems.append(f"couldn't re-check Alpaca: {str(e)[:120]}")
+                break
+            if not rep.still_open or time.monotonic() >= deadline:
+                break
+            time.sleep(1)
         if rep.still_open:
             log.error("[ORB] %s: still open after flattening: %s", phase, ", ".join(rep.still_open))
         return rep
+
+    def repair_exits(self, day: str) -> list[tuple]:
+        """After the close: any exit booked at the close or by /flatten or Close now whose recorded
+        price differs from the real sell fill at Alpaca gets corrected (order, account, P&L).
+        Returns [(client id, symbol, old price, new price, new P&L)]."""
+        fixed = []
+        rows = self.log.db.execute(
+            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND o.status = 'closed'"
+            " AND o.exit_reason IN ('flat', 'flatten', 'manual')", (day,)).fetchall()
+        acct = DayAccount.for_day(self.runs_root, day, self.rules)
+        for row in rows:
+            try:
+                fill = self.broker.last_sell_fill(row["symbol"], after=row["filled_at"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("repair: couldn't look up %s's sell: %s", row["symbol"], e)
+                continue
+            if fill is None or row["exit_price"] is not None and abs(fill[0] - row["exit_price"]) < 0.005:
+                continue
+            price, when = fill
+            fp = row["filled_price"] or row["limit_price"]
+            qty = row["filled_qty"] or row["qty"]
+            pnl = round((price - fp) * qty, 2)
+            self.log.update_order(row["client_order_id"], exit_price=price, exited_at=when, pnl_usd=pnl)
+            acct.correct_exit(row["symbol"], price)
+            fixed.append((row["client_order_id"], row["symbol"], row["exit_price"], price, pnl))
+            log.info("repair: %s exit %s -> %.2f (P&L %.2f)", row["symbol"], row["exit_price"], price, pnl)
+        return fixed
 
     def _wait_for_fills(self, closing: dict) -> dict:
         fills, deadline = {}, time.monotonic() + self.fill_wait_s

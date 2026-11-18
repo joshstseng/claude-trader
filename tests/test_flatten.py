@@ -155,3 +155,53 @@ class FlattenScheduleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlattenFixesTest(unittest.TestCase):
+    """2026-11-18: /flatten booked NET at its entry price because the sell's id wasn't read."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.rules = settings.risk_rules()
+        self.log = tradelog.TradeLog(self.root / "t.db")
+        run = self.log.start_run("orb", "live", {}, date_from=DAY, date_to=DAY)
+        self.log.db.execute("INSERT INTO signals (run_id, strategy, source, date, symbol, status, entry, stop, target,"
+                            " qty, created_at) VALUES (?, 'orb', 'live', ?, 'NET', 'pass', 299.16, 287.80, 321.88, 4,"
+                            " 'x')", (run, DAY))
+        self.sid = self.log.db.execute("SELECT max(id) FROM signals").fetchone()[0]
+        self.cid = f"orb-{DAY}-{self.sid}"
+        self.log.add_order(self.sid, self.cid, "NET", 4, 299.46, 300.0, 321.88)
+        acct = DayAccount.for_day(self.root, DAY, self.rules)
+        acct.record_entry("NET", 4, 299.05, 45.0, signal_id=self.sid)
+        acct.record_exit("NET", 299.05, reason="flatten")              # the wrong booking
+        self.log.update_order(self.cid, status="closed", filled_qty=4, filled_price=299.05, exit_reason="flatten",
+                              exit_price=299.05, pnl_usd=0.0, filled_at="2026-11-18T15:18:00+00:00")
+
+    def tearDown(self):
+        self.log.close()
+        self.tmp.cleanup()
+
+    def test_repair_books_the_real_sell_price(self):
+        class Broker:
+            def last_sell_fill(self, symbol, after=None):
+                return (302.32, "2026-11-18T20:25:52+00:00")
+        fixed = Flattener(Broker(), self.log, self.rules, runs_root=self.root).repair_exits(DAY)
+        self.assertEqual(fixed, [(self.cid, "NET", 299.05, 302.32, 13.08)])
+        row = self.log.order(self.cid)
+        self.assertEqual((row["exit_price"], row["pnl_usd"]), (302.32, 13.08))
+        self.assertEqual(DayAccount.for_day(self.root, DAY, self.rules).realized_pnl, 13.08)
+        self.assertEqual(Flattener(Broker(), self.log, self.rules, runs_root=self.root).repair_exits(DAY), [])  # once
+
+    def test_a_sell_still_filling_is_not_reported_open(self):
+        class Slow(FakeAlpaca):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def open_orders(self):
+                self.calls += 1
+                return [OrderInfo("x", "sell-in-flight", "accepted", 0, None)] if self.calls == 1 else []
+        rep = Flattener(Slow(), self.log, self.rules, runs_root=self.root, fill_wait_s=0.2, recheck_s=3).flatten(
+            DAY, phase="kill switch")
+        self.assertEqual(rep.still_open, [])
