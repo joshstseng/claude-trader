@@ -127,7 +127,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 ## Step 3: Claude filter + Backtest #2
 
-**What:** add Claude as a filter that can only say no to a trade, then rerun the Step 2 backtest and compare. It lives in the **head bot** (Step 2b), reviewing every bot's setups.
+**What:** add Claude as a filter that can only say no to a trade, then rerun the Step 2 backtest and compare. It lives in the **head bot** (Step 2b), reviewing every bot's setups. If the head is down or slow, a bot trades without the filter (the baseline), so trading never waits on it ([how the head grows](plans/step-2b-bot-fleet.md#the-head-bot-from-here)).
 
 *Not designed yet on purpose. We plan this step when we get here.*
 
@@ -139,7 +139,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 **What:** the approval tap turns off, and the risk check is the only gate. Discord becomes a feed of what happened, plus `/pause`, `/flatten` and a kill switch.
 
-**Likely includes:** nothing new for uptime: the head bot's watchdog (Step 2b) already pings you when a bot stops responding.
+**Likely includes:** global limits enforced across bots (each bot checks them itself from the shared database) and the head bot's automatic pause on a breached limit or a misbehaving bot. Uptime is covered: the head's watchdog (2b.4) already pings you when a bot stops responding.
 
 **Gate:** ~100+ hands-off trades with positive expected profit, matching the backtest, with no runaway bugs.
 
@@ -167,6 +167,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | First strategy is the **ORB bot** (opening range breakout, long only, US stocks only). Everything is tagged with a strategy id so more bots can be added later |
 | 2026-11-18 | **No `[ORB]` tag in the trading bot's Discord messages**: each bot posts under its own Discord name. Logs keep the tag; each strategy's backtests post as its own bot (`DISCORD_BOT_TOKEN_<ID>` on the Mac), tagged only when another bot posts them |
 | 2026-11-18 | **Step 2b: Bot fleet** before Step 3: one bot per strategy (own brain, Discord bot and Alpaca paper account, shared channels), a head bot (summary, watchdog, global limits; later the Claude filter), a market data service (not a Discord bot) and a shared Postgres database. Every trading bot stays safe on its own. Bot #2 only once a second strategy backtests well |
+| 2026-11-19 | **Head bot v1** (2b.4): same code with `BOT_ROLE=head`, its own Discord bot, **no broker keys**, a second service in the same Railway project. Watchdog (3 min, 9:00 AM ET to 20 min after the close), fleet summary at 4:35 PM ET (each bot's own summary stays), `/fleet`, `/pause-all`, `/resume-all`, `/flatten-all` through a commands table each bot answers with its own keys |
 | 2026-11-18 | **Live trade management** in Discord: `#live-trades` (one updating card per trade, buttons; stops only move up) and `#closed-trades` (renamed `#trades`, @mention on close). Resolved alerts in `#setups` collapse to one grey line with an ET timestamp |
 | 2026-11-17 | Step 1b uses **free live data only** (measure Alpaca IEX vs Yahoo first; TradingView CME/COMEX can't be used: futures, no API) and moves the live bot onto the **backtest's engine** |
 | 2026-11-17 | Backtest baseline and Step 1b both use a **cash limit**: the $5k account can't use margin, so usually one ~$3.5k position at a time |

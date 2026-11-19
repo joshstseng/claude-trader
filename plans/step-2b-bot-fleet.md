@@ -9,7 +9,7 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅
 ```
                 ┌────────────── HEAD BOT ───────────────┐
                 │ summary · watchdog · global limits    │
-                │ /flatten all · later: Claude review   │
+                │ /flatten-all · later: Claude review   │
                 └───────┬───────────────────────────────┘
                         │ reads all bots, sets global pause
    MARKET DATA ──bars──►  ORB BOT · BOT B · BOT C  ──orders⇄fills──►  own Alpaca paper account each
@@ -26,9 +26,9 @@ Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅
 | Decision | Choice |
 |---|---|
 | Bots | **One bot per strategy**: same codebase, many deployments (`STRATEGY=orb`, …). Each has its own strategy module ("brain"); the plumbing (orders, cards, 3:55 sell, restart safety, backtest engine) is shared |
-| Discord | Each bot is its **own Discord bot** (own name in the channels); all post to the **same channels**, tagged `[ORB]`, `[…]` |
+| Discord | Each bot is its **own Discord bot** (own name in the channels); all post to the **same channels**. *(No `[ORB]` tag in messages since 2026-11-18: the bot's name says who posted)* |
 | Accounts | **One Alpaca paper account per bot**: no collisions in the same stock, the 3:55 sell touches only that bot, P&L per bot for free. (Real money later: several live accounts may be harder; fallback is per-bot tracking in one account) |
-| Head bot | Supervisor only: combined daily summary, watchdog (heartbeats), global limits, `/flatten all`; later the home of the Step 3 Claude filter. **Trading never waits on it** |
+| Head bot | Supervisor only: combined daily summary, watchdog (heartbeats), global limits, `/flatten-all`; later the home of the Step 3 Claude filter. **Trading never waits on it** |
 | Market data | Its **own service, not a Discord bot**: fetches once, serves every bot; kept apart from the head so the traders never depend on the head |
 | Database | **Railway Postgres**, shared; every row tagged with its bot. Replaces the per-bot log file (other services can't read a Railway volume) |
 | Safety rule | **Every trading bot stays safe on its own.** If the head, the data service or the database fails, open trades stay protected at Alpaca and are still sold by 3:55 |
@@ -84,7 +84,7 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - The live trade log uses **Railway Postgres** when `DATABASE_URL` is set ([app/db.py](../app/db.py): the same small interface the trade log already used, translating its SQL). Replays, backtests and tests keep using SQLite files
 - **One-time copy:** on its first start with Postgres, the bot copies its SQLite trade log in (every row, same ids; new ids continue after them) and keeps the old file as `tradelog.db.moved-to-postgres`. It never runs twice
 - New shared tables: `heartbeats` (each bot writes one a minute) and `fleet_settings` (`global_pause`, which every bot now honors on top of its own `/pause`). Order queries are filtered by the running bot's strategy, since every bot's rows now sit in one database
-- The commands table for `/flatten all` moves to 2b.4 with the head bot, which is its only user
+- The commands table for `/flatten-all` moves to 2b.4 with the head bot, which is its only user
 
 **ORB regression checks (all passed):** 195 tests on SQLite **and** the same suite with the trade log on a throwaway local Postgres (Docker); new Postgres tests for the copy, heartbeats, global pause and per-bot orders; baseline rerun run #9 = run #1 on all 20,690 signals; the Docker image installs the Postgres driver and writes a heartbeat. Tests never touch the live database
 
@@ -92,9 +92,9 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - Its own Discord bot and Railway service; reads the shared database
 - **Combined daily summary** across all bots (each bot's own summary can stay or be retired)
 - **Watchdog:** a bot's heartbeat older than ~3 minutes during market hours → @mention in `#system`; the trading bots watch the head's heartbeat in turn
-- **Global controls:** `/pause all`, `/resume all`, `/flatten all` (via the commands table; each bot flattens its own account); total money at risk across bots shown in `/status` (global limits enforced later)
+- **Global controls:** `/pause-all`, `/resume-all`, `/flatten-all` (via the commands table; each bot flattens its own account); total money at risk across bots shown in `/fleet` (global limits enforced later)
 
-**Done when:** stopping a bot on Railway gets you pinged within ~3 minutes, the combined summary posts after the close, and `/flatten all` closes a test position through the bot.
+**Done when:** stopping a bot on Railway gets you pinged within ~3 minutes, the combined summary posts after the close, and `/flatten-all` closes a test position through the bot.
 
 **As built (2026-11-19):** setup and tests in [setup-head-bot.md](setup-head-bot.md)
 - [app/head.py](../app/head.py): the same code started with `BOT_ROLE=head` (its own folder `bots/head/`, `[HEAD]` in logs); its own Discord bot (`DISCORD_BOT_TOKEN_HEAD`, refused if it equals a trading bot's token); no broker keys; needs `DATABASE_URL`
@@ -104,6 +104,18 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - Commands table: `fleet_commands` + `fleet_command_acks`. Each trading bot checks every 5 s, acts only on commands under 2 minutes old (a bot starting later never acts on an old one), runs the same flatten as its own `/flatten` (shared code), posts the result in `#system` and answers
 
 **ORB regression checks (all passed):** 212 tests on SQLite and on a throwaway local Postgres (17 new); baseline rerun run #10 = run #1 on all 20,690 signals; live Yahoo path normal; the head bot logged into Discord and wrote its heartbeat (against the throwaway database). The ORB bot's changes are small and only additive: the heartbeat note, watching the head, and answering the head's commands
+
+**Going live (2026-11-19):** pushed during market hours with nothing open (you OK'd it); the head runs as a second service in the **same Railway project** as the ORB bot and Postgres. Left to check: `/fleet`, `/pause-all` → `/resume-all`, `/flatten-all` with nothing open, and the watchdog ping (stop the ORB service on a market day inside the watch window, outside the 9:45–11:35 AM scan)
+
+### The head bot from here
+v1 only watches and relays. Where it grows, in order:
+| When | What the head adds | How it stays safe |
+|---|---|---|
+| **Step 3** (Claude filter) | Every bot's setup goes to the head for a Claude review that can only say **no** (veto, with a one-line reason on the alert); backtested against the baseline first | A time limit on the review: if the head is down or slow, the bot carries on without the filter (exactly the baseline), so trading never waits on it |
+| **Before Step 4** | **Global limits enforced**, not just shown: fleet-wide daily loss limit, total money at risk, open positions across bots, the same stock in two bots | Each bot checks the limits itself from the shared database before an entry, so they hold even with the head down; the head adds the global pause and pings |
+| **Step 4** (hands-off) | Automatic kill switch: global pause (or flatten) on a breached limit, an error storm, a bot that keeps going silent, or the live data drifting from the backtest's; a weekly report per bot vs its backtest | Pausing is always safe; anything stronger (flatten) is a rule you approve in advance |
+| **2b.5 / 2b.6** | Watches the market data service's heartbeat too; picks up bot #2 automatically (watchdog, summary, `/flatten-all`) | Bots fall back to fetching their own data |
+| **Step 5** (real money) | How much money each bot gets, from its results | Hard limits stay in each bot's own risk check |
 
 ### 2b.5 Market data service *(right before bot #2)*
 - Fetches bars, prices, the calendar and focus lists once; serves them over Railway's private network; caches

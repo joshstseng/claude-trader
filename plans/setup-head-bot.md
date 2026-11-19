@@ -8,7 +8,7 @@ Part of [step-2b-bot-fleet.md](step-2b-bot-fleet.md). About 10 minutes. The head
 A separate Discord application ("Uri"), added to the server with **bot** + **applications.commands** and View Channels, Send Messages, Embed Links, Read Message History, Use Slash Commands. Its token is `DISCORD_BOT_TOKEN_HEAD` (also in your Mac's `.env`).
 
 ## 2. Its Railway service (you, ~5 min, after the code is pushed)
-1. Railway project → **New** → **GitHub Repo** → the same `claude-trader` repo
+1. Your **existing** Railway project (the one with the ORB service and Postgres; not a new project) → **New** → **GitHub Repo** → the same `claude-trader` repo
 2. **No volume** (skip it)
 3. **Variables** → **Raw Editor**, paste and fill in:
    ```
@@ -35,7 +35,9 @@ A separate Discord application ("Uri"), added to the server with **bot** + **app
 
 If the head is down, nothing about trading changes: trades stay protected at Alpaca and are still sold at 3:55; each bot's own `/pause` and `/flatten` keep working.
 
-## Test it (once, after the close)
+Where it goes from here (Claude filter, enforced global limits, automatic kill switch): [step-2b-bot-fleet.md → The head bot from here](step-2b-bot-fleet.md#the-head-bot-from-here).
+
+## Test it
 1. `/fleet` → ORB bot 🟢
 2. Stop the ORB service on Railway (Deployments → ⋮ → Remove) in the watch window → ping within ~3–4 min → **Redeploy** → "✅ back". *(Outside the window, the head only notices; the ping test needs a market day before 4:20 PM ET)*
 3. `/pause-all` → ORB's heartbeat note becomes "paused (global)" in `/fleet` → `/resume-all`

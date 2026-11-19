@@ -52,6 +52,8 @@ About 10 minutes. After this the bot runs in the cloud, so your Mac can be off.
 | Stop the bot completely | Railway → service → Deployments → newest → **⋮** → **Remove**. `#system` shows 🔴 stopped. **Redeploy** to start again |
 | See what it did | Railway → View Logs, or `/status` and `/today` in Discord |
 | Change a setting (e.g. target 1R) | Edit `config/strategies/orb.json` or `config/risk.json`, commit, push |
+| See every bot at once | `/fleet` (head bot). The head is a second service in the same project ([setup-head-bot.md](setup-head-bot.md)); a push redeploys both |
+| Pause or close everything, every bot | `/pause-all` · `/resume-all` · `/flatten-all confirm:yes` (head bot). A bot's own `/pause` and `/flatten` still work, even with the head down |
 
 ## If something's wrong
 - **Crashes right away with "… is not set"** → a variable is missing or misspelled in step 4.
