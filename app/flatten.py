@@ -46,7 +46,8 @@ class FlattenReport:
 
     def text(self) -> str:
         head = {"flat": "🏁 **3:55 PM: out for the day**", "backup": "🛟 **Backup check**",
-                "kill switch": "🛑 **Flattened by /flatten**"}.get(self.phase, f"**{self.phase}**")
+                "kill switch": "🛑 **Flattened by /flatten**",
+                "flatten all": "🛑 **Flattened by the head bot's /flatten-all**"}.get(self.phase, f"**{self.phase}**")
         lines = [head]
         for sym, qty, reason, price, pnl in self.exits:
             p = f"{'+' if (pnl or 0) >= 0 else '−'}${abs(pnl or 0):,.2f}" if pnl is not None else "P&L unknown"

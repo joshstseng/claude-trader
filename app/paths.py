@@ -29,7 +29,9 @@ def bot_dir(bot_id: str) -> Path:
     return STORAGE_DIR if bot_id == "orb" else STORAGE_DIR / "bots" / bot_id
 
 
-BOT_ID = (os.environ.get("STRATEGY") or "orb").strip().lower() or "orb"
+# Step 2b.4: BOT_ROLE=head makes this process the head bot (its own folder: bots/head/)
+IS_HEAD = (os.environ.get("BOT_ROLE") or "").strip().lower() == "head"
+BOT_ID = "head" if IS_HEAD else (os.environ.get("STRATEGY") or "orb").strip().lower() or "orb"
 BOT_DIR = bot_dir(BOT_ID)
 DATA_DIR = BOT_DIR / "data"                  # this bot's trade log (SQLite), pause setting, lock
 RUNS_DIR = BOT_DIR / "runs"                  # one folder per signal: runs/<date>/<strategy>/<TICKER>/

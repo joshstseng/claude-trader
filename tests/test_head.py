@@ -1,0 +1,288 @@
+"""Step 2b.4: the head bot (watchdog, fleet summary, /fleet, global pause, /flatten-all via the
+commands table) and the trading bot's side (answering commands, watching the head)."""
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from datetime import date, datetime, time as dtime, timedelta, timezone
+from pathlib import Path
+from unittest import mock
+
+from app import head, market, settings, tradelog
+from app.flatten import FlattenReport
+
+REPO = Path(__file__).resolve().parent.parent
+NY = market.NY
+DAY = date(2026, 11, 19)
+SESSION = market.Session(DAY, dtime(9, 30), dtime(16, 0))
+
+
+def et(h, m=0, d=DAY):
+    return datetime.combine(d, dtime(h, m), tzinfo=NY).astimezone(timezone.utc)
+
+
+def beat(bot, at: datetime, note="running"):
+    return {"bot": bot, "at": at.isoformat(timespec="seconds"), "note": note}
+
+
+class WatchdogTest(unittest.TestCase):
+    def test_a_silent_bot_pings_once_then_says_its_back(self):
+        w = head.Watchdog(exclude={"head"})
+        now = et(10, 30)
+        beats = [beat("orb", now - timedelta(minutes=4)), beat("head", now - timedelta(hours=1))]
+        msgs = w.check(beats, now, window=True)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("ORB bot is silent", msgs[0][0])
+        self.assertTrue(msgs[0][1])                                   # @mention
+        self.assertEqual(w.check(beats, now + timedelta(minutes=1), window=True), [])   # once per outage
+        back = w.check([beat("orb", now + timedelta(minutes=5))], now + timedelta(minutes=5, seconds=10), True)
+        self.assertEqual(len(back), 1)
+        self.assertIn("ORB bot is back", back[0][0])
+        self.assertFalse(back[0][1])
+
+    def test_fresh_bots_and_quiet_hours_dont_ping(self):
+        w = head.Watchdog(exclude={"head"})
+        now = et(10, 30)
+        self.assertEqual(w.check([beat("orb", now - timedelta(seconds=170))], now, True), [])
+        self.assertEqual(w.check([beat("orb", now - timedelta(minutes=30))], now, False), [])   # outside window
+
+    def test_retired_bots_are_not_watched(self):
+        w = head.Watchdog(exclude={"head"})
+        now = et(10, 30)
+        self.assertEqual(w.check([beat("demo", now - timedelta(days=4))], now, True), [])
+
+    def test_the_trading_bot_watches_only_the_head(self):
+        w = head.head_watchdog()
+        now = et(10, 30)
+        beats = [beat("orb", now - timedelta(hours=2)), beat("head", now - timedelta(minutes=6))]
+        msgs = w.check(beats, now, True)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("Head bot is silent", msgs[0][0])
+        self.assertIn("Trading carries on", msgs[0][0])
+        fresh = head.head_watchdog()
+        self.assertEqual(fresh.check([beat("head", now - timedelta(minutes=4))], now, True), [])   # 5-min limit
+
+    def test_no_head_yet_means_nothing_to_say(self):
+        self.assertEqual(head.head_watchdog().check([beat("orb", et(10))], et(10, 30), True), [])
+
+    def test_windows(self):
+        self.assertFalse(head.watching(et(8, 59), SESSION))
+        self.assertTrue(head.watching(et(9, 0), SESSION))
+        self.assertTrue(head.watching(et(16, 15), SESSION))           # the 4:15 summary is watched too
+        self.assertFalse(head.watching(et(16, 25), SESSION))
+        self.assertFalse(head.watching(et(12), None))                 # market closed
+        early = market.Session(DAY, dtime(9, 30), dtime(13, 0))
+        self.assertFalse(head.watching(et(13, 30), early))
+        self.assertTrue(head.in_market_hours(et(9, 30), SESSION))
+        self.assertFalse(head.in_market_hours(et(9, 29), SESSION))
+        self.assertFalse(head.in_market_hours(et(16, 1), SESSION))
+
+
+class FleetDataTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = tradelog.TradeLog(Path(self.tmp.name) / "t.db")
+
+    def tearDown(self):
+        self.log.close()
+        self.tmp.cleanup()
+
+    def trade(self, strat, day, sym, *, alerted=True, order=None, entry=100.0, stop=98.0):
+        run = self.log.start_run(strat, "live", {}, date_from=day, date_to=day)
+        self.log.db.execute("INSERT INTO signals (run_id, strategy, source, date, symbol, status, entry, stop, target,"
+                            " created_at) VALUES (?, ?, 'live', ?, ?, 'pass', ?, ?, 104, 'x')",
+                            (run, strat, day, sym, entry, stop))
+        sid = self.log.db.execute("SELECT max(id) FROM signals").fetchone()[0]
+        self.log.record_alert(sid, sent=alerted, held_reason=None if alerted else "daily alert cap (5)")
+        if order is not None:
+            cid = f"{strat}-{day}-{sid}"
+            self.log.add_order(sid, cid, sym, 10, entry, stop, 104)
+            self.log.update_order(cid, **order)
+        return sid
+
+    def test_commands_are_carried_out_once_per_bot(self):
+        cid = self.log.add_command("flatten", by="me")
+        self.assertEqual([r["id"] for r in self.log.pending_commands("orb")], [cid])
+        self.log.ack_command(cid, "orb", "closed 1")
+        self.log.ack_command(cid, "orb", "again")                    # a retry can't double-answer
+        self.assertEqual(self.log.pending_commands("orb"), [])
+        self.assertEqual([r["id"] for r in self.log.pending_commands("vwap")], [cid])   # other bots still owe it
+        self.assertEqual([(a["bot"], a["result"]) for a in self.log.command_acks(cid)], [("orb", "closed 1")])
+
+    def test_old_commands_are_ignored(self):
+        cid = self.log.add_command("flatten")
+        old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
+        self.log.db.execute("UPDATE fleet_commands SET created_at = ? WHERE id = ?", (old, cid))
+        self.assertEqual(self.log.pending_commands("orb"), [])
+
+    def test_numbers_and_summary(self):
+        day = "2026-11-19"
+        self.trade("orb", day, "TSLA", order=dict(status="closed", filled_qty=10, filled_price=100.0,
+                                                    exit_price=104.0, pnl_usd=40.0))
+        self.trade("orb", day, "NVDA", order=dict(status="filled", filled_qty=10, filled_price=101.0))
+        self.trade("orb", day, "AMD", alerted=False)
+        self.trade("orb", "2026-11-18", "CMG", order=dict(status="closed", filled_qty=10, filled_price=100.0,
+                                                           exit_price=99.0, pnl_usd=-10.0))
+        self.trade("demo", day, "AAPL", order=dict(status="closed", filled_qty=10, filled_price=100.0,
+                                                    exit_price=98.0, pnl_usd=-20.0))
+        n = head.bot_numbers(self.log, "orb", day)
+        self.assertEqual((n["signals"], n["alerts"], n["orders"], n["closed"], n["wins"]), (3, 2, 2, 1, 1))
+        self.assertEqual((n["day_pnl"], n["all_time"], n["open"]), (40.0, 30.0, 1))
+        self.assertAlmostEqual(n["at_risk"], 30.0)                    # NVDA: (101 - 98) x 10 sh
+        self.assertEqual(head.bot_numbers(self.log, "demo", day)["day_pnl"], -20.0)   # kept apart by bot
+
+        now = et(16, 35)
+        self.log.beat("orb")
+        self.log.beat("head")
+        self.assertEqual(head.fleet_bots(self.log, datetime.now(timezone.utc), day), ["demo", "orb"])
+        text = head.summary_text([head.bot_numbers(self.log, b, day) for b in ("demo", "orb")], day, False)
+        self.assertIn("🧭 **Fleet · Thu Nov 19**", text)
+        self.assertIn("**ORB bot** · 3 signals · 2 alerts · 2 orders · 1 closed (1 won) · **+$40.00** · "
+                      "all-time +$30.00 · ⚠️ 1 still open", text)
+        self.assertIn("**Fleet today +$20.00**", text)
+        one = head.summary_text([head.bot_numbers(self.log, "orb", day)], day, True)
+        self.assertIn("global pause is **on**", one)
+        self.assertNotIn("Fleet today", one)                         # one bot: no total line
+        del now
+
+    def test_status(self):
+        day = datetime.now(NY).strftime("%Y-%m-%d")
+        self.trade("orb", day, "NVDA", order=dict(status="filled", filled_qty=10, filled_price=101.0))
+        self.log.beat("orb", "running")
+        self.log.set_fleet("global_pause", "on")
+        text = head.status_text(self.log, datetime.now(timezone.utc), SESSION)
+        self.assertIn("global pause on", text)
+        self.assertIn("**ORB bot** 🟢 running", text)
+        self.assertIn("Money at risk across bots: $30.00", text)
+
+    def test_flatten_report(self):
+        acks = [{"bot": "orb", "result": "closed 2"}]
+        text = head.flatten_report(acks, ["orb", "vwap"])
+        self.assertIn("✅ **ORB bot**: closed 2", text)
+        self.assertIn("⚠️ **VWAP bot**: no answer", text)
+        self.assertIn("No trading bot is alive", head.flatten_report([], []))
+
+
+class FakeBot:
+    def __init__(self, rep):
+        self.flattener, self.rep, self.posted, self.after = object(), rep, [], []
+
+    async def flatten_now(self, phase):
+        self.phase = phase
+        return self.rep, self.rep.text() if self.rep.anything else "nothing"
+
+    async def post_system(self, text, ping=False):
+        self.posted.append(text)
+
+    async def after_flatten(self, rep, text):
+        self.after.append(text)
+
+
+class TradingBotSideTest(unittest.TestCase):
+    def test_flatten_command(self):
+        from app.__main__ import run_fleet_command
+        rep = FlattenReport("flatten all", exits=[("TSLA", 6, "flatten", 400.0, 12.5)], cancelled_entries=["AMD"])
+        bot = FakeBot(rep)
+        result = asyncio.run(run_fleet_command(bot, "flatten"))
+        self.assertEqual(bot.phase, "flatten all")
+        self.assertEqual(result, "closed 1 · cancelled 1 unfilled")
+        self.assertIn("Flattened by the head bot's /flatten-all", bot.posted[0])
+        self.assertEqual(len(bot.after), 1)
+        self.assertEqual(asyncio.run(run_fleet_command(FakeBot(FlattenReport("flatten all")), "flatten")),
+                         "nothing was open")
+        self.assertIn("unknown", asyncio.run(run_fleet_command(bot, "dance")))
+
+    def test_the_bot_answers_the_heads_command(self):
+        from app import __main__ as m
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            cid = log.add_command("flatten")
+            bot = FakeBot(FlattenReport("flatten all"))
+
+            async def go():
+                t = asyncio.create_task(m.fleet_commands(bot, every_s=0.05, trade_log=log))
+                for _ in range(100):
+                    await asyncio.sleep(0.02)
+                    if log.command_acks(cid):
+                        break
+                t.cancel()
+            asyncio.run(go())
+            self.assertEqual([(a["bot"], a["result"]) for a in log.command_acks(cid)], [("orb", "nothing was open")])
+            log.close()
+
+
+class HeadBotTest(unittest.TestCase):
+    def test_flatten_all_pauses_asks_and_reports(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.beat("orb")
+            cfg = head.HeadSettings("x", 1, 2, 3, 4)
+
+            async def go():
+                bot = head.make_head_bot(cfg, log, market.SkillCalendar())
+
+                async def orb_answers():
+                    while True:
+                        for c in log.pending_commands("orb"):
+                            log.ack_command(c["id"], "orb", "closed 1")
+                        await asyncio.sleep(0.02)
+                t = asyncio.create_task(orb_answers())
+                text = await bot.flatten_all("me", wait_s=5, poll_s=0.02)
+                t.cancel()
+                return text
+            text = asyncio.run(go())
+            self.assertTrue(log.global_pause())
+            self.assertIn("✅ **ORB bot**: closed 1", text)
+            log.close()
+
+    def test_summary_posts_once_a_day_after_435(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            cfg = head.HeadSettings("x", 1, 2, 3, 4)
+            posted = []
+
+            async def go():
+                bot = head.make_head_bot(cfg, log, market.SkillCalendar())
+
+                async def post(ch, text, ping=False):
+                    posted.append((ch, text))
+                bot.post = post
+                r = [await bot.summary_if_due(et(16, 30), SESSION),
+                     await bot.summary_if_due(et(16, 36), SESSION),
+                     await bot.summary_if_due(et(17, 0), SESSION),
+                     await bot.summary_if_due(et(17, 0), None)]
+                return r
+            self.assertEqual(asyncio.run(go()), [False, True, False, False])
+            self.assertEqual(posted[0][0], 4)                         # #daily-summary
+            self.assertIn("Fleet · Thu Nov 19", posted[0][1])
+            log.close()
+
+
+class SettingsTest(unittest.TestCase):
+    def test_the_head_needs_its_own_discord_bot(self):
+        env = {"DISCORD_BOT_TOKEN_HEAD": "same", "DISCORD_BOT_TOKEN": "same", "DISCORD_GUILD_ID": "1",
+               "DISCORD_OWNER_ID": "2", "DISCORD_CHANNEL_SYSTEM": "3", "DISCORD_CHANNEL_DAILY_SUMMARY": "4"}
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaises(settings.SettingsError):
+                head.head_settings()
+            os.environ["DISCORD_BOT_TOKEN_HEAD"] = "own"
+            self.assertEqual(head.head_settings().channel_daily_summary, 4)
+
+    def test_bot_role_head_gets_its_own_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = {k: v for k, v in os.environ.items() if k not in ("STRATEGY", "BOT_ROLE")}
+            env.update(TRADER_STORAGE=d, BOT_ROLE="head")
+            out = subprocess.run([sys.executable, "-c", "import json; from app import paths; "
+                                  "print(json.dumps([paths.BOT_ID, str(paths.DATA_DIR)]))"],
+                                 cwd=REPO, env=env, capture_output=True, text=True, check=True)
+            bot_id, data = json.loads(out.stdout.strip().splitlines()[-1])
+            self.assertEqual(bot_id, "head")
+            self.assertEqual(Path(data), Path(d).resolve() / "bots" / "head" / "data")
+
+
+if __name__ == "__main__":
+    unittest.main()

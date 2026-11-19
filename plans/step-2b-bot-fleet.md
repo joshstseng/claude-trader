@@ -1,6 +1,6 @@
 # Step 2b: Bot fleet
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅ 2b.3 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅ 2b.3 ✅ 2b.4 built, going live) · runs in parallel with the Step 2 strategy work, before Step 3
 
 **Goal:** turn the one-bot app into a fleet: **one bot per strategy**, each with its own brain, Discord identity and Alpaca paper account; a **head bot** that watches them all; one **market data service**; one **shared database**. The ORB bot keeps running, unchanged in behavior, the whole time.
 
@@ -95,6 +95,15 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - **Global controls:** `/pause all`, `/resume all`, `/flatten all` (via the commands table; each bot flattens its own account); total money at risk across bots shown in `/status` (global limits enforced later)
 
 **Done when:** stopping a bot on Railway gets you pinged within ~3 minutes, the combined summary posts after the close, and `/flatten all` closes a test position through the bot.
+
+**As built (2026-11-19):** setup and tests in [setup-head-bot.md](setup-head-bot.md)
+- [app/head.py](../app/head.py): the same code started with `BOT_ROLE=head` (its own folder `bots/head/`, `[HEAD]` in logs); its own Discord bot (`DISCORD_BOT_TOKEN_HEAD`, refused if it equals a trading bot's token); no broker keys; needs `DATABASE_URL`
+- Watchdog: heartbeat older than 3 min, 9:00 AM ET to 20 min after the close → @mention once per outage, "back" when it returns; bots with no heartbeat for 3 days count as retired. The trading bots watch the head (5 min, market hours) and their heartbeat note now says `running` / `paused (own /pause)` / `paused (global)`
+- Fleet summary at 4:35 PM ET (once a day, remembered in the database so a restart can't repeat it); each bot's own summary stays
+- Slash commands (Discord names can't have spaces): `/fleet`, `/pause-all`, `/resume-all`, `/flatten-all confirm:yes`
+- Commands table: `fleet_commands` + `fleet_command_acks`. Each trading bot checks every 5 s, acts only on commands under 2 minutes old (a bot starting later never acts on an old one), runs the same flatten as its own `/flatten` (shared code), posts the result in `#system` and answers
+
+**ORB regression checks (all passed):** 212 tests on SQLite and on a throwaway local Postgres (17 new); baseline rerun run #10 = run #1 on all 20,690 signals; live Yahoo path normal; the head bot logged into Discord and wrote its heartbeat (against the throwaway database). The ORB bot's changes are small and only additive: the heartbeat note, watching the head, and answering the head's commands
 
 ### 2b.5 Market data service *(right before bot #2)*
 - Fetches bars, prices, the calendar and focus lists once; serves them over Railway's private network; caches

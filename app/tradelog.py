@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -125,6 +125,22 @@ CREATE TABLE IF NOT EXISTS fleet_settings (
     key         TEXT PRIMARY KEY,         -- e.g. global_pause (set by the head bot, read by every bot)
     value       TEXT,
     updated_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fleet_commands (
+    id          INTEGER PRIMARY KEY,
+    command     TEXT NOT NULL,            -- e.g. flatten (posted by the head bot, carried out by every bot) (2b.4)
+    created_at  TEXT NOT NULL,
+    created_by  TEXT,
+    note        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fleet_command_acks (
+    command_id  INTEGER NOT NULL,
+    bot         TEXT NOT NULL,            -- the bot that carried it out
+    at          TEXT NOT NULL,
+    result      TEXT,
+    PRIMARY KEY (command_id, bot)
 );
 
 CREATE TABLE IF NOT EXISTS trade_events (
@@ -261,6 +277,32 @@ class TradeLog:
     def global_pause(self) -> bool:
         """The head bot's pause for every bot (on top of each bot's own /pause)."""
         return (self.fleet("global_pause") or "") == "on"
+
+    # ---------------------------------------------------------- fleet commands (2b.4)
+
+    def add_command(self, command: str, by: str | None = None, note: str | None = None) -> int:
+        """The head bot asks every bot to do something (e.g. "flatten"); each bot does it with its own keys."""
+        cur = self.db.execute("INSERT INTO fleet_commands (command, created_at, created_by, note) VALUES (?, ?, ?, ?)",
+                              (command, _now(), by, note))
+        self.db.commit()
+        return cur.lastrowid
+
+    def pending_commands(self, bot: str, max_age_s: int = 120) -> list:
+        """Commands this bot hasn't carried out yet. Only recent ones: a bot starting later never acts
+        on an old command (the global pause still holds it back)."""
+        since = (datetime.now(timezone.utc) - timedelta(seconds=max_age_s)).isoformat(timespec="seconds")
+        return self.db.execute(
+            "SELECT c.* FROM fleet_commands c LEFT JOIN fleet_command_acks a ON a.command_id = c.id AND a.bot = ?"
+            " WHERE a.command_id IS NULL AND c.created_at >= ? ORDER BY c.id", (bot, since)).fetchall()
+
+    def ack_command(self, command_id: int, bot: str, result: str | None = None) -> None:
+        self.db.execute("INSERT INTO fleet_command_acks (command_id, bot, at, result) VALUES (?, ?, ?, ?)"
+                        " ON CONFLICT (command_id, bot) DO NOTHING", (command_id, bot, _now(), result))
+        self.db.commit()
+
+    def command_acks(self, command_id: int) -> list:
+        return self.db.execute("SELECT * FROM fleet_command_acks WHERE command_id = ? ORDER BY bot",
+                               (command_id,)).fetchall()
 
     def close(self) -> None:
         self.db.close()

@@ -12,7 +12,7 @@ class BotTag(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         from app.strategies import tag
-        record.bot = tag()
+        record.bot = "HEAD" if paths.IS_HEAD else tag()
         return True
 
 

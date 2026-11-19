@@ -518,21 +518,9 @@ class TraderBot(discord.Client):
             if self.flattener is None:
                 await interaction.followup.send("⏸️ Paused. (Ordering isn't set up in this app, so there's nothing to close.)")
                 return
-            from app.market import NY as _NY
-            day = datetime.now(_NY).strftime("%Y-%m-%d")
-            rep = await asyncio.to_thread(self.flattener.flatten, day, "kill switch")
-            text = rep.text() if rep.anything else "🛑 **/flatten**: nothing was open."
+            rep, text = await self.flatten_now("kill switch")
             await interaction.followup.send(text + "\n⏸️ **Paused**: no alerts or approvals until `/resume`.")
-            for sid, line, st in rep.alert_updates:
-                try:
-                    if self.cards is not None:
-                        await self.cards.sync_signal(sid)
-                    else:
-                        await self.note_on_alert(sid, line, st)
-                except Exception:  # noqa: BLE001
-                    log.warning("couldn't update trade %s", sid, exc_info=True)
-            if rep.anything and self.cards is None:
-                await self.post_trades(text)
+            await self.after_flatten(rep, text)
 
         @tree.error
         async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -541,6 +529,28 @@ class TraderBot(discord.Client):
                                                         ephemeral=True)
             else:
                 log.exception("slash command failed", exc_info=error)
+
+    async def flatten_now(self, phase: str):
+        """Close everything on this bot's account now (/flatten, or the head bot's /flatten-all)."""
+        from app.market import NY as _NY
+        day = datetime.now(_NY).strftime("%Y-%m-%d")
+        rep = await asyncio.to_thread(self.flattener.flatten, day, phase)
+        empty = {"kill switch": "🛑 **/flatten**: nothing was open.",
+                 "flatten all": "🛑 **/flatten-all** (head bot): nothing was open."}.get(phase, "🛑 Nothing was open.")
+        return rep, (rep.text() if rep.anything else empty)
+
+    async def after_flatten(self, rep, text: str) -> None:
+        """Update the trades' cards (or alerts) after a flatten."""
+        for sid, line, st in rep.alert_updates:
+            try:
+                if self.cards is not None:
+                    await self.cards.sync_signal(sid)
+                else:
+                    await self.note_on_alert(sid, line, st)
+            except Exception:  # noqa: BLE001
+                log.warning("couldn't update trade %s", sid, exc_info=True)
+        if rep.anything and self.cards is None:
+            await self.post_trades(text)
 
     def positions_text(self) -> str:
         if self.broker is None:

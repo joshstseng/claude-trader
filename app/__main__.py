@@ -157,15 +157,63 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         asyncio.create_task(later())
 
 
-async def heartbeat(every_s: int = 60) -> None:
-    """Step 2b.3: tell the shared database this bot is alive (the head bot's watchdog reads it)."""
+async def heartbeat(every_s: int = 60, state: AppState | None = None, notify=None) -> None:
+    """Step 2b.3: tell the shared database this bot is alive (the head bot's watchdog reads it).
+    2b.4: the note says whether it's paused, and the bot watches the head's heartbeat in turn
+    (during market hours; a silent head never stops trading, it's just worth knowing)."""
+    from datetime import timezone
+    from app import head
     hb = tradelog.TradeLog()
+    watch = head.head_watchdog()
     while True:
         try:
-            await asyncio.to_thread(hb.beat, strategies.active_id(), "running")
+            own = state is not None and state.paused
+
+            def write() -> None:
+                note = "paused (own /pause)" if own else "paused (global)" if hb.global_pause() else "running"
+                hb.beat(strategies.active_id(), note)
+            await asyncio.to_thread(write)
+            if notify is not None and state is not None:
+                now = datetime.now(timezone.utc)
+                beats = await asyncio.to_thread(hb.heartbeats)
+                for text, ping in watch.check(beats, now, head.in_market_hours(now, state.session)):
+                    await notify(text, ping=ping)
         except Exception:  # noqa: BLE001 - a missed beat is the watchdog's business, never the bot's
             logging.getLogger("app").warning("heartbeat failed", exc_info=True)
         await asyncio.sleep(every_s)
+
+
+async def fleet_commands(bot, every_s: float = 5.0, trade_log=None) -> None:
+    """Step 2b.4: carry out the head bot's commands (e.g. /flatten-all) with this bot's own keys,
+    then answer in the shared database so the head can report."""
+    db = trade_log or tradelog.TradeLog()
+    me = strategies.active_id()
+    while True:
+        try:
+            for c in await asyncio.to_thread(db.pending_commands, me):
+                result = await run_fleet_command(bot, c["command"])
+                await asyncio.to_thread(db.ack_command, c["id"], me, result)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("app").warning("fleet command check failed", exc_info=True)
+        await asyncio.sleep(every_s)
+
+
+async def run_fleet_command(bot, command: str) -> str:
+    if command != "flatten":
+        return f"unknown command {command!r}, ignored"
+    if bot.flattener is None:
+        return "nothing to close (ordering isn't set up)"
+    rep, text = await bot.flatten_now("flatten all")
+    await bot.post_system(text)
+    await bot.after_flatten(rep, text)
+    if not rep.anything:
+        return "nothing was open"
+    parts = [f"closed {len(rep.exits)}"] + ([f"cancelled {len(rep.cancelled_entries)} unfilled"]
+                                           if rep.cancelled_entries else [])
+    if rep.still_open:
+        parts.append("⚠️ still open: " + ", ".join(rep.still_open))
+    parts += [f"⚠️ {p}" for p in rep.problems]
+    return " · ".join(parts)
 
 
 async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
@@ -252,7 +300,8 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
         stream_task = asyncio.create_task(track_trades(bot, rules))
-        asyncio.create_task(heartbeat())
+        asyncio.create_task(heartbeat(state=state, notify=bot.post_system))
+        asyncio.create_task(fleet_commands(bot))
         if bot.cards is not None:
             asyncio.create_task(bot.cards.refresh_loop())
         asyncio.create_task(restart_check(bot, calendar, rules, orb))
@@ -291,6 +340,9 @@ def single_instance():
 
 
 def cmd_run(a) -> int:
+    if paths.IS_HEAD:                                    # 2b.4: BOT_ROLE=head runs the head bot instead
+        from app import head
+        return head.run()
     from alpaca.trading.client import TradingClient
     lock = single_instance()  # noqa: F841 - held until exit
     logs.setup()

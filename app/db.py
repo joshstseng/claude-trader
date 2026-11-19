@@ -17,7 +17,7 @@ import re
 import threading
 
 log = logging.getLogger(__name__)
-ID_TABLES = {"runs", "signals", "alerts", "responses", "orders", "trade_events"}
+ID_TABLES = {"runs", "signals", "alerts", "responses", "orders", "trade_events", "fleet_commands"}
 _INSERT = re.compile(r"^\s*INSERT\s+INTO\s+(\w+)", re.I)
 
 
