@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from app import paths, tradelog
 from app.account import DayAccount
+from app.strategies import active_id
 from app.market import Session
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ class Reconciler:
         # 1. today's orders: what happened while we were away?
         rows = self.log.db.execute(
             "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND s.source = 'live'"
-            " AND o.status IN ('submitted', 'partially_filled', 'filled')", (day,)).fetchall()
+            " AND s.strategy = ?"
+            " AND o.status IN ('submitted', 'partially_filled', 'filled')", (day, active_id())).fetchall()
         for row in rows:
             cid, sym = row["client_order_id"], row["symbol"]
             info = self.broker.order(cid)

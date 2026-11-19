@@ -1,6 +1,6 @@
 # Step 2b: Bot fleet
 
-Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
+Part of [ROADMAP.md](../ROADMAP.md). Status: 🟨 In progress (2b.1 ✅ 2b.2 ✅ 2b.3 ✅) · runs in parallel with the Step 2 strategy work, before Step 3
 
 **Goal:** turn the one-bot app into a fleet: **one bot per strategy**, each with its own brain, Discord identity and Alpaca paper account; a **head bot** that watches them all; one **market data service**; one **shared database**. The ORB bot keeps running, unchanged in behavior, the whole time.
 
@@ -73,12 +73,20 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 
 **ORB regression checks (all passed):** 192 tests (new: the ORB bot's storage paths are exactly the ones it has always used on Railway; another bot's are separate; shared data is shared); baseline rerun run #8 = run #1 on all 20,690 signals; live Yahoo path normal
 
-### 2b.3 Shared database
+### 2b.3 Shared database ✅
 - Railway Postgres; the trade log works on Postgres (and still on SQLite for local tests and backtests)
 - Move the ORB bot's existing live history from its Railway volume into Postgres
 - New: a **heartbeat** row per bot every minute; a **global pause** flag every bot reads before an entry; a **commands** table (e.g. "flatten") that bots poll, so the head never needs anyone's broker keys
 
 **Done when:** the ORB bot runs on Postgres with its history moved, and the heartbeat, pause and commands work in tests.
+
+**As built (2026-11-18):**
+- The live trade log uses **Railway Postgres** when `DATABASE_URL` is set ([app/db.py](../app/db.py): the same small interface the trade log already used, translating its SQL). Replays, backtests and tests keep using SQLite files
+- **One-time copy:** on its first start with Postgres, the bot copies its SQLite trade log in (every row, same ids; new ids continue after them) and keeps the old file as `tradelog.db.moved-to-postgres`. It never runs twice
+- New shared tables: `heartbeats` (each bot writes one a minute) and `fleet_settings` (`global_pause`, which every bot now honors on top of its own `/pause`). Order queries are filtered by the running bot's strategy, since every bot's rows now sit in one database
+- The commands table for `/flatten all` moves to 2b.4 with the head bot, which is its only user
+
+**ORB regression checks (all passed):** 195 tests on SQLite **and** the same suite with the trade log on a throwaway local Postgres (Docker); new Postgres tests for the copy, heartbeats, global pause and per-bot orders; baseline rerun run #9 = run #1 on all 20,690 signals; the Docker image installs the Postgres driver and writes a heartbeat. Tests never touch the live database
 
 ### 2b.4 Head bot v1
 - Its own Discord bot and Railway service; reads the shared database

@@ -115,6 +115,18 @@ CREATE TABLE IF NOT EXISTS orders (
     note             TEXT
 );
 
+CREATE TABLE IF NOT EXISTS heartbeats (
+    bot      TEXT PRIMARY KEY,            -- e.g. orb: one row per bot, updated every minute (2b.3)
+    at       TEXT NOT NULL,
+    note     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS fleet_settings (
+    key         TEXT PRIMARY KEY,         -- e.g. global_pause (set by the head bot, read by every bot)
+    value       TEXT,
+    updated_at  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS trade_events (
     id               INTEGER PRIMARY KEY,
     client_order_id  TEXT NOT NULL,
@@ -178,8 +190,39 @@ def _f(x: Any) -> float | None:
     return None if x is None else float(x)
 
 
+def database_url() -> str | None:
+    """The shared Postgres (Step 2b.3), set on Railway as DATABASE_URL. None = local SQLite."""
+    import os
+    return (os.environ.get("DATABASE_URL") or "").strip() or None
+
+
 class TradeLog:
-    def __init__(self, path: Path = DEFAULT_DB):
+    """The live trade log uses the shared Postgres when DATABASE_URL is set; replays, backtests and
+    tests (which pass their own file) always use SQLite."""
+
+    def __init__(self, path: Path = DEFAULT_DB, *, url: str | None = None, schema: str | None = None):
+        if url is None and path == DEFAULT_DB:
+            url = database_url()
+        import os
+        test_pg = os.environ.get("TRADELOG_TEST_PG_URL")
+        if test_pg and url is None:                     # tests only: run this log on Postgres instead,
+            import hashlib                              # in a fresh schema per test file
+            url, schema = test_pg, "t_" + hashlib.md5(str(path).encode()).hexdigest()[:16]
+            import psycopg
+            with psycopg.connect(url, autocommit=True) as c:
+                c.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        if url:
+            from app.db import PgConnection, pg_schema
+            self.backend, self.path = "postgres", None
+            self.db = PgConnection(url, schema=schema)
+            self.db.executescript(pg_schema(SCHEMA))
+            for table, cols in MIGRATIONS.items():
+                have = self.db.columns(table)
+                for name, kind in cols:
+                    if name not in have:
+                        self.db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {kind}")
+            return
+        self.backend = "sqlite"
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.db = sqlite3.connect(path, check_same_thread=False)
@@ -194,6 +237,30 @@ class TradeLog:
                     self.db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
         self.db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         self.db.commit()
+
+    # ------------------------------------------------------------ fleet (2b.3)
+
+    def beat(self, bot: str, note: str | None = None) -> None:
+        """This bot is alive (the head bot's watchdog reads it)."""
+        self.db.execute("INSERT INTO heartbeats (bot, at, note) VALUES (?, ?, ?) ON CONFLICT (bot) DO UPDATE"
+                        " SET at = excluded.at, note = excluded.note", (bot, _now(), note))
+        self.db.commit()
+
+    def heartbeats(self) -> list:
+        return self.db.execute("SELECT * FROM heartbeats ORDER BY bot").fetchall()
+
+    def set_fleet(self, key: str, value: str | None) -> None:
+        self.db.execute("INSERT INTO fleet_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key)"
+                        " DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", (key, value, _now()))
+        self.db.commit()
+
+    def fleet(self, key: str) -> str | None:
+        r = self.db.execute("SELECT value FROM fleet_settings WHERE key = ?", (key,)).fetchone()
+        return r["value"] if r else None
+
+    def global_pause(self) -> bool:
+        """The head bot's pause for every bot (on top of each bot's own /pause)."""
+        return (self.fleet("global_pause") or "") == "on"
 
     def close(self) -> None:
         self.db.close()
@@ -451,10 +518,15 @@ class TradeLog:
     def order(self, client_order_id: str) -> sqlite3.Row | None:
         return self.db.execute("SELECT * FROM orders WHERE client_order_id = ?", (client_order_id,)).fetchone()
 
-    def open_orders(self) -> list[sqlite3.Row]:
-        """Live paper orders that are still waiting to fill or in a trade."""
-        return self.db.execute("SELECT * FROM orders WHERE status IN ('submitted', 'partially_filled', 'filled')"
-                               " ORDER BY id").fetchall()
+    def open_orders(self, strategy: str | None = None) -> list[sqlite3.Row]:
+        """Live paper orders still waiting to fill or in a trade (one bot's, when strategy is given:
+        in the shared database every bot's orders sit side by side)."""
+        if strategy is None:
+            return self.db.execute("SELECT * FROM orders WHERE status IN ('submitted', 'partially_filled',"
+                                   " 'filled') ORDER BY id").fetchall()
+        return self.db.execute("SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.strategy = ?"
+                               " AND o.status IN ('submitted', 'partially_filled', 'filled') ORDER BY o.id",
+                               (strategy,)).fetchall()
 
     def add_event(self, client_order_id: str, kind: str, old=None, new=None, note: str | None = None) -> None:
         self.db.execute("INSERT INTO trade_events (client_order_id, at, kind, old_value, new_value, note)"
@@ -491,3 +563,49 @@ class TradeLog:
 
 def rows_as_dicts(rows: Iterable[sqlite3.Row]) -> list[dict]:
     return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------- one-time move (2b.3)
+
+COPY_ORDER = ("runs", "signals", "alerts", "responses", "orders", "trade_events", "outcomes", "heartbeats",
+              "fleet_settings")
+
+
+def migrate_sqlite_to_postgres(sqlite_path: Path, pg: "TradeLog") -> dict | None:
+    """Copy a bot's SQLite trade log into the (empty) shared Postgres, keeping every id, then keep
+    the SQLite file as a backup (renamed). Does nothing if there's no file or Postgres already has
+    runs. Returns {table: rows copied} when it copied."""
+    if pg.backend != "postgres" or not sqlite_path.exists():
+        return None
+    if pg.db.execute("SELECT COUNT(*) FROM runs").fetchone()[0]:
+        return None
+    src = sqlite3.connect(sqlite_path)
+    src.row_factory = sqlite3.Row
+    copied = {}
+    for table in COPY_ORDER:
+        try:
+            rows = src.execute(f"SELECT * FROM {table}").fetchall()
+        except sqlite3.OperationalError:
+            continue                                     # an older file without this table
+        if not rows:
+            copied[table] = 0
+            continue
+        cols = [c for c in rows[0].keys() if c in pg.db.columns(table)]
+        marks = ", ".join("?" for _ in cols)
+        for r in rows:
+            pg.db.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({marks})", tuple(r[c] for c in cols))
+        copied[table] = len(rows)
+    for table in ID_SEQUENCED:
+        pg.db.execute(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                      f"COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)")
+    src.close()
+    backup = sqlite_path.with_name(sqlite_path.name + ".moved-to-postgres")
+    sqlite_path.rename(backup)
+    for extra in ("-wal", "-shm"):
+        side = sqlite_path.with_name(sqlite_path.name + extra)
+        if side.exists():
+            side.rename(backup.with_name(backup.name + extra))
+    return copied
+
+
+ID_SEQUENCED = ("runs", "signals", "alerts", "responses", "orders", "trade_events")

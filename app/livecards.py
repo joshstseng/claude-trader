@@ -18,6 +18,7 @@ from datetime import datetime, time as dtime
 import discord
 
 from app import cards
+from app.strategies import active_id
 from app.market import NY
 
 log = logging.getLogger(__name__)
@@ -272,14 +273,14 @@ class LiveCards:
 
     async def ensure_all(self) -> None:
         """Every open trade has a card (e.g. trades from before this feature, or after a restart)."""
-        for row in self.log.open_orders():
+        for row in self.log.open_orders(strategy=active_id()):
             if not await self._live_msg(row):
                 await self.sync(row["client_order_id"])
 
     async def refresh_loop(self, every_s: int = 60) -> None:
         while True:
             try:
-                rows = self.log.open_orders()
+                rows = self.log.open_orders(strategy=active_id())
                 prices = {}
                 if any(r["status"] == "filled" for r in rows):
                     try:
@@ -313,8 +314,9 @@ class LiveCards:
     async def add_backtest_lines(self, day: str) -> None:
         """After the 4:15 step: each closed card gets 'Backtest said…'."""
         rows = self.log.db.execute(
-            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND o.status = 'closed'"
-            " AND o.closed_card_message_id IS NOT NULL", (day,)).fetchall()
+            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND s.strategy = ?"
+            " AND o.status = 'closed'"
+            " AND o.closed_card_message_id IS NOT NULL", (day, active_id())).fetchall()
         ch = await self._channel(self.closed_channel)
         for row in rows:
             bt = self.log.outcome(row["signal_id"])

@@ -1,6 +1,7 @@
 """The outcome engine: target / stop / flat, gaps, ties, costs, early closes, and TSLA's real day."""
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -118,6 +119,7 @@ class TslaRealDayTest(unittest.TestCase):
 
 
 class TradeLogOutcomeTest(unittest.TestCase):
+    @unittest.skipIf(os.environ.get("TRADELOG_TEST_PG_URL"), "SQLite-only: checks an old SQLite file's upgrade")
     def test_old_database_gets_the_new_columns(self):
         """The Railway database was made with the first version of the outcomes table."""
         with tempfile.TemporaryDirectory() as d:

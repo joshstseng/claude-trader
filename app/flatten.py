@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from app import paths, tradelog
 from app.account import DayAccount
+from app.strategies import active_id
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -139,8 +140,9 @@ class Flattener:
         Returns [(client id, symbol, old price, new price, new P&L)]."""
         fixed = []
         rows = self.log.db.execute(
-            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND o.status = 'closed'"
-            " AND o.exit_reason IN ('flat', 'flatten', 'manual')", (day,)).fetchall()
+            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND s.strategy = ?"
+            " AND o.status = 'closed'"
+            " AND o.exit_reason IN ('flat', 'flatten', 'manual')", (day, active_id())).fetchall()
         acct = DayAccount.for_day(self.runs_root, day, self.rules)
         for row in rows:
             try:

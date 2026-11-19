@@ -157,6 +157,17 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         asyncio.create_task(later())
 
 
+async def heartbeat(every_s: int = 60) -> None:
+    """Step 2b.3: tell the shared database this bot is alive (the head bot's watchdog reads it)."""
+    hb = tradelog.TradeLog()
+    while True:
+        try:
+            await asyncio.to_thread(hb.beat, strategies.active_id(), "running")
+        except Exception:  # noqa: BLE001 - a missed beat is the watchdog's business, never the bot's
+            logging.getLogger("app").warning("heartbeat failed", exc_info=True)
+        await asyncio.sleep(every_s)
+
+
 async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     """The Discord bot and the scheduler, side by side in one loop."""
     from app.discord_bot import DiscordAlerter, DiscordErrorHandler, TraderBot
@@ -169,7 +180,8 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
     broker = AlpacaPaper()
     bot.broker = broker
     bot.desk = OrderDesk(tradelog.TradeLog(), broker, orb.settings, rules)   # Approve -> paper order
-    bot.desk.pause_source = lambda: state.paused
+    pause_log = tradelog.TradeLog()                     # the head bot's global pause lives in the shared DB
+    bot.desk.pause_source = lambda: state.paused or pause_log.global_pause()
     bot.flattener = Flattener(broker, tradelog.TradeLog(), rules)            # 3:55 PM and /flatten
     bot.assumed_cost = orb.settings.get("costs", {}).get("pct_per_side", 0.0)   # for /pnl
     if dcfg.channel_live_trades:                                             # 1b.9: trade cards
@@ -193,7 +205,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
 
         def make(day: str) -> BotDay:
             d = make_day(day, alerter)
-            d.pause_source = lambda: state.paused
+            d.pause_source = lambda: state.paused or pause_log.global_pause()
             return d
 
         orders_on = bool(orb.settings.get("orders", {}).get("enabled"))
@@ -240,6 +252,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
         stream_task = asyncio.create_task(track_trades(bot, rules))
+        asyncio.create_task(heartbeat())
         if bot.cards is not None:
             asyncio.create_task(bot.cards.refresh_loop())
         asyncio.create_task(restart_check(bot, calendar, rules, orb))
@@ -289,6 +302,10 @@ def cmd_run(a) -> int:
     dcfg = settings.discord_settings()
     calendar = market.AlpacaCalendar(TradingClient(al.api_key, al.secret_key, paper=True))
     trade_log = tradelog.TradeLog()
+    if trade_log.backend == "postgres":                  # 2b.3: first start on the shared DB moves the old log
+        moved = tradelog.migrate_sqlite_to_postgres(tradelog.DEFAULT_DB, trade_log)
+        if moved:
+            logging.getLogger("app").info("moved the trade log into the shared database: %s", moved)
     state = AppState(started_at=datetime.now(market.NY))
 
     def make_day(day: str, alerter) -> BotDay:

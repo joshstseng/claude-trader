@@ -2,3 +2,4 @@ alpaca-py==0.45.0
 discord.py==2.7.1
 python-dotenv==1.2.4
 tzdata==2026.6
+psycopg[binary]==3.3.9

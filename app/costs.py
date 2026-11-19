@@ -37,8 +37,9 @@ def paper_trades(trade_log: tradelog.TradeLog, day: str | None = None) -> list[d
     sql = ("SELECT o.*, s.date AS day, s.entry AS plan_entry, s.stop AS plan_stop, s.target AS plan_target,"
            " s.trigger_time, oc.result AS bt_result, oc.exit_price AS bt_exit, oc.r_gross AS bt_r"
            " FROM orders o JOIN signals s ON s.id = o.signal_id LEFT JOIN outcomes oc ON oc.signal_id = s.id"
-           " WHERE s.source = 'live'" + (" AND s.date = ?" if day else "") + " ORDER BY o.id")
-    rows = trade_log.db.execute(sql, (day,) if day else ()).fetchall()
+           " WHERE s.source = 'live' AND s.strategy = ?" + (" AND s.date = ?" if day else "") + " ORDER BY o.id")
+    from app.strategies import active_id
+    rows = trade_log.db.execute(sql, (active_id(), day) if day else (active_id(),)).fetchall()
     out = []
     for r in rows:
         d = dict(r)
