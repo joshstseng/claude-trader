@@ -85,6 +85,20 @@ async def results_and_summary(post, trade_log, day: str, session, rules: dict, o
                                        extra=extra))
 
 
+def daily_report(bot, day: str, trade_log=None):
+    """2b.4: the after-close summary goes to the shared database; the head bot posts it in #daily-summary
+    (one post a day for the whole fleet, each bot's detail in its thread). If the database can't take it,
+    the bot posts it itself so it's never lost."""
+    async def save(text: str) -> None:
+        try:
+            db = trade_log or tradelog.TradeLog()
+            await asyncio.to_thread(db.save_report, strategies.active_id(), day, text)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("app").warning("couldn't hand the summary to the head bot; posting it", exc_info=True)
+            await bot.post_daily(text)
+    return save
+
+
 async def track_trades(bot, rules: dict) -> None:
     """Step 1b.5: Alpaca's live order events (fills, stops, targets) -> the books, #trades and the alert.
     Restarts the stream if it ever stops."""
@@ -271,7 +285,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                         await bot.cards.refresh_closed(cid)
             except Exception:  # noqa: BLE001
                 logging.getLogger("app").exception("couldn't repair today's exits")
-            await results_and_summary(bot.post_daily, trade_log, day_bot.day, state.session, rules, orb,
+            await results_and_summary(daily_report(bot, day_bot.day), trade_log, day_bot.day, state.session, rules, orb,
                                       run_id=day_bot.run_id,
                                       scanned=day_bot.scanned_today)
             if bot.cards is not None:
@@ -281,7 +295,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                     logging.getLogger("app").warning("couldn't add backtest lines", exc_info=True)
 
         async def catch_up(day: str, session) -> None:
-            await results_and_summary(bot.post_daily, trade_log, day, session, rules, orb, only_if_new=True)
+            await results_and_summary(daily_report(bot, day), trade_log, day, session, rules, orb, only_if_new=True)
 
         async def flatten(day_bot: BotDay, phase: str) -> None:
             rep = await asyncio.to_thread(bot.flattener.flatten, day_bot.day, phase)

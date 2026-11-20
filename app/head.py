@@ -5,7 +5,8 @@
 What it does:
     watchdog        every minute, reads each bot's heartbeat in the shared database; a bot silent for
                     3+ minutes during market hours gets you an @mention in #system (and "back" when it returns)
-    fleet summary   once a market day at 4:35 PM ET, one combined line per bot in #daily-summary
+    fleet summary   the only post in #daily-summary: after the close, once every bot has handed in its
+                    report (or by 5:00 PM ET), one line per bot, with each bot's full summary in a thread
     /fleet          every bot: alive?, paused?, today's signals and P&L, open trades and money at risk
     /pause-all      sets the shared global pause (every bot reads it before an alert or an order)
     /resume-all     lifts it (a bot's own /pause stays as it was)
@@ -24,7 +25,7 @@ import os
 import signal
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
 
 from app import costs, market, settings, tradelog
 
@@ -36,7 +37,8 @@ HEAD_SILENT_S = 300           # the trading bots' view of the head
 RECENT_DAYS = 3               # bots with no heartbeat for longer are treated as retired (not watched)
 WATCH_FROM = dtime(9, 0)      # the watchdog's window: 9:00 AM ET to 20 minutes after the close
 WATCH_AFTER_CLOSE_MIN = 20
-SUMMARY_AT = dtime(16, 35)    # after every bot's own 4:15 PM summary
+SUMMARY_FROM = dtime(16, 15)  # the fleet summary posts once every bot has handed in its report...
+SUMMARY_DEADLINE = dtime(17, 0)   # ...or at 5:00 PM ET, naming any bot that didn't
 FLATTEN_WAIT_S = 60
 DAY_FMT = "%a %b %d"
 
@@ -190,7 +192,44 @@ def bot_numbers(trade_log: tradelog.TradeLog, bot: str, day: str) -> dict:
             "all_trades": every["trades"], "open": len(open_), "at_risk": risk}
 
 
-def summary_text(nums: list[dict], day: str, paused: bool) -> str:
+def chunks(text: str, limit: int = 1900) -> list[str]:
+    """Split a long report into Discord-sized messages, on line breaks."""
+    out, cur = [], ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(line[:limit])
+            line = line[limit:]
+        if len(cur) + len(line) + 1 > limit and cur:
+            out.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        out.append(cur)
+    return out
+
+
+def summary_days(now: datetime, calendar, back: int = 7) -> list[tuple[str, bool]]:
+    """Days the fleet summary may be due: today once it's past 4:15 PM ET, and the previous market day
+    (catch-up if the head was down). [(day, is_today)]"""
+    et = now.astimezone(NY)
+    out = []
+    for i in range(1, back + 1):
+        d = et.date() - timedelta(days=i)
+        if calendar.session(d) is not None:
+            out.append((d.isoformat(), False))
+            break
+    s = calendar.session(et.date())
+    if s is not None and et >= s.at(SUMMARY_FROM):
+        out.append((et.date().isoformat(), True))
+    return out
+
+
+def summary_text(nums: list[dict], day: str, paused: bool, missing: list[str] | None = None,
+                 details: bool = False) -> str:
     d = datetime.strptime(day, "%Y-%m-%d")
     lines = [f"🧭 **Fleet · {d:{DAY_FMT}}**" + (" · ⏸️ global pause is **on**" if paused else "")]
     if not nums:
@@ -204,6 +243,10 @@ def summary_text(nums: list[dict], day: str, paused: bool) -> str:
     if len(nums) > 1:
         lines.append(f"**Fleet today {_usd(sum(n['day_pnl'] for n in nums))}** · all-time "
                      f"{_usd(sum(n['all_time'] for n in nums))}")
+    for bot in missing or []:
+        lines.append(f"⚠️ No summary from **{bot_name(bot)}** by 5:00 PM ET (check its logs on Railway)")
+    if details:
+        lines.append("-# 🧵 Each bot's full summary (every signal, paper trades, costs, data check) is in the thread")
     return "\n".join(lines)
 
 
@@ -298,21 +341,61 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 await self.post(cfg.channel_system, text, ping=ping)
             await self.summary_if_due(now, session)
 
-        async def summary_if_due(self, now: datetime, session) -> bool:
-            et = now.astimezone(NY)
-            day = et.strftime("%Y-%m-%d")
-            if session is None or et < session.at(SUMMARY_AT):
-                return False
-            if await asyncio.to_thread(self.log.fleet, "head_summary_day") == day:
-                return False
-            text = await asyncio.to_thread(self.summary, now, day)
-            await self.post(cfg.channel_daily_summary, text)
-            await asyncio.to_thread(self.log.set_fleet, "head_summary_day", day)
-            return True
+        async def summary_if_due(self, now: datetime, session=None) -> bool:
+            """Post each due day's fleet summary once (remembered in the database)."""
+            posted = False
+            for day, today in summary_days(now, self.calendar):
+                if await asyncio.to_thread(self.already_posted, day):
+                    continue
+                plan = await asyncio.to_thread(self.summary, now, day, today)
+                if plan is None:
+                    continue
+                text, details = plan
+                await self.post_summary(text, details, day)
+                await asyncio.to_thread(self.log.set_fleet, f"head_summary:{day}", "posted")
+                posted = True
+            return posted
 
-        def summary(self, now: datetime, day: str) -> str:
-            nums = [bot_numbers(self.log, b, day) for b in fleet_bots(self.log, now, day)]
-            return summary_text(nums, day, self.log.global_pause())
+        def already_posted(self, day: str) -> bool:
+            return bool(self.log.fleet(f"head_summary:{day}")) or self.log.fleet("head_summary_day") == day
+
+        def summary(self, now: datetime, day: str, today: bool):
+            """(text, [(bot, report)]) when it's time to post, None while waiting for reports.
+            Today: once every bot has reported, or at 5:00 PM ET. A past day (catch-up): only if reports exist."""
+            reports = {r["bot"]: r["text"] for r in self.log.reports(day)}
+            expected = fleet_bots(self.log, now, day)
+            if today:
+                deadline = now.astimezone(NY) >= datetime.combine(date.fromisoformat(day), SUMMARY_DEADLINE, tzinfo=NY)
+                if not (set(expected) <= set(reports) or deadline):
+                    return None
+            elif not reports:
+                return None
+            bots = sorted(set(expected) | set(reports))
+            nums = [bot_numbers(self.log, b, day) for b in bots]
+            missing = [b for b in bots if b not in reports]
+            details = [(b, reports[b]) for b in bots if b in reports]
+            return summary_text(nums, day, self.log.global_pause(), missing, details=bool(details)), details
+
+        async def post_summary(self, text: str, details: list[tuple[str, str]], day: str) -> None:
+            """The one post in #daily-summary, with each bot's full report in a thread under it."""
+            await self.ready.wait()
+            ch = self.get_channel(cfg.channel_daily_summary)
+            if ch is None:
+                raise RuntimeError(f"channel {cfg.channel_daily_summary} not found (check the channel ids)")
+            msg = await ch.send(text[:1990])
+            if not details:
+                return
+            target = ch
+            try:
+                target = await msg.create_thread(name=f"{date.fromisoformat(day):{DAY_FMT}} · each bot's summary",
+                                                 auto_archive_duration=1440)
+            except discord.HTTPException as e:
+                await self.post(cfg.channel_system, "⚠️ Couldn't open the daily summary's thread (the head bot needs "
+                                f"**Create Public Threads** and **Send Messages in Threads**): {str(e)[:120]}. "
+                                "Posted the details in the channel instead.")
+            for bot, report in details:
+                for part in chunks(f"**{bot_name(bot)}**\n{report}"):
+                    await target.send(part)
 
         async def run_loop(self) -> None:
             while True:

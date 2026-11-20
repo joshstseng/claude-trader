@@ -143,6 +143,14 @@ CREATE TABLE IF NOT EXISTS fleet_command_acks (
     PRIMARY KEY (command_id, bot)
 );
 
+CREATE TABLE IF NOT EXISTS daily_reports (
+    bot   TEXT NOT NULL,                  -- each bot's full after-close summary; the head bot posts them (2b.4)
+    day   TEXT NOT NULL,
+    text  TEXT NOT NULL,
+    at    TEXT NOT NULL,
+    PRIMARY KEY (bot, day)
+);
+
 CREATE TABLE IF NOT EXISTS trade_events (
     id               INTEGER PRIMARY KEY,
     client_order_id  TEXT NOT NULL,
@@ -303,6 +311,15 @@ class TradeLog:
     def command_acks(self, command_id: int) -> list:
         return self.db.execute("SELECT * FROM fleet_command_acks WHERE command_id = ? ORDER BY bot",
                                (command_id,)).fetchall()
+
+    def save_report(self, bot: str, day: str, text: str) -> None:
+        """A bot's after-close summary, for the head bot to post (a rerun replaces it)."""
+        self.db.execute("INSERT INTO daily_reports (bot, day, text, at) VALUES (?, ?, ?, ?) ON CONFLICT (bot, day)"
+                        " DO UPDATE SET text = excluded.text, at = excluded.at", (bot, day, text, _now()))
+        self.db.commit()
+
+    def reports(self, day: str) -> list:
+        return self.db.execute("SELECT * FROM daily_reports WHERE day = ? ORDER BY bot", (day,)).fetchall()
 
     def close(self) -> None:
         self.db.close()

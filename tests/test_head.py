@@ -239,27 +239,100 @@ class HeadBotTest(unittest.TestCase):
             self.assertIn("✅ **ORB bot**: closed 1", text)
             log.close()
 
-    def test_summary_posts_once_a_day_after_435(self):
+    def run_summary(self, log, times, calendar=None):
+        """Call summary_if_due at each ET time; return what it posted: [(text, details)]."""
+        cfg = head.HeadSettings("x", 1, 2, 3, 4)
+        posted = []
+
+        async def go():
+            bot = head.make_head_bot(cfg, log, calendar or market.SkillCalendar())
+
+            async def post_summary(text, details, day):
+                posted.append((day, text, details))
+            bot.post_summary = post_summary
+            return [await bot.summary_if_due(t) for t in times]
+        return asyncio.run(go()), posted
+
+    def test_summary_waits_for_every_bot_then_posts_once(self):
         with tempfile.TemporaryDirectory() as d:
             log = tradelog.TradeLog(Path(d) / "t.db")
-            cfg = head.HeadSettings("x", 1, 2, 3, 4)
-            posted = []
-
-            async def go():
-                bot = head.make_head_bot(cfg, log, market.SkillCalendar())
-
-                async def post(ch, text, ping=False):
-                    posted.append((ch, text))
-                bot.post = post
-                r = [await bot.summary_if_due(et(16, 30), SESSION),
-                     await bot.summary_if_due(et(16, 36), SESSION),
-                     await bot.summary_if_due(et(17, 0), SESSION),
-                     await bot.summary_if_due(et(17, 0), None)]
-                return r
-            self.assertEqual(asyncio.run(go()), [False, True, False, False])
-            self.assertEqual(posted[0][0], 4)                         # #daily-summary
-            self.assertIn("Fleet · Thu Nov 19", posted[0][1])
+            log.beat("orb")
+            log.beat("head")
+            day = DAY.isoformat()
+            r1, _ = self.run_summary(log, [et(16, 0), et(16, 20)])     # before 4:15; no report yet
+            self.assertEqual(r1, [False, False])
+            log.save_report("orb", day, "**[ORB] Thu Nov 19**\nTSLA ❌ stop −1.00R")
+            r2, posted = self.run_summary(log, [et(16, 21), et(16, 40)])
+            self.assertEqual(r2, [True, False])                        # posted once
+            day_, text, details = posted[0]
+            self.assertEqual(day_, day)
+            self.assertIn("Fleet · Thu Nov 19", text)
+            self.assertIn("in the thread", text)
+            self.assertEqual(details, [("orb", "**[ORB] Thu Nov 19**\nTSLA ❌ stop −1.00R")])
             log.close()
+
+    def test_deadline_names_a_bot_that_didnt_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.beat("orb")
+            r, posted = self.run_summary(log, [et(16, 59), et(17, 0)])
+            self.assertEqual(r, [False, True])
+            self.assertIn("No summary from **ORB bot**", posted[0][1])
+            self.assertEqual(posted[0][2], [])
+            log.close()
+
+    def test_catch_up_for_the_previous_market_day(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.save_report("orb", "2026-11-19", "Thursday's summary")
+            friday_morning = et(8, 0, d=date(2026, 11, 20))
+            r, posted = self.run_summary(log, [friday_morning, friday_morning])
+            self.assertEqual(r, [True, False])
+            self.assertEqual(posted[0][0], "2026-11-19")
+            # a day without reports (e.g. before the head existed) is never posted late
+            monday = et(8, 0, d=date(2026, 11, 23))
+            self.assertEqual(self.run_summary(log, [monday])[0], [False])
+            log.close()
+
+    def test_a_day_the_old_head_already_posted_isnt_repeated(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.save_report("orb", DAY.isoformat(), "x")
+            log.set_fleet("head_summary_day", DAY.isoformat())
+            self.assertEqual(self.run_summary(log, [et(16, 40)])[0], [False])
+            log.close()
+
+    def test_long_reports_split_on_lines(self):
+        text = "\n".join(f"line {i} " + "x" * 80 for i in range(60))
+        parts = head.chunks(text, 1900)
+        self.assertTrue(all(len(p) <= 1900 for p in parts))
+        self.assertEqual("\n".join(parts), text)
+        self.assertEqual(head.chunks("y" * 4000, 1900)[0], "y" * 1900)
+
+
+class DailyReportTest(unittest.TestCase):
+    def test_the_bot_hands_its_summary_to_the_head(self):
+        from app.__main__ import daily_report
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            bot = FakeBot(FlattenReport("x"))
+            bot.daily = []
+
+            async def post_daily(text):
+                bot.daily.append(text)
+            bot.post_daily = post_daily
+            asyncio.run(daily_report(bot, "2026-11-19", trade_log=log)("summary text"))
+            self.assertEqual([(r["bot"], r["text"]) for r in log.reports("2026-11-19")], [("orb", "summary text")])
+            self.assertEqual(bot.daily, [])                         # not posted by the bot itself
+            asyncio.run(daily_report(bot, "2026-11-19", trade_log=log)("rerun"))   # a rerun replaces it
+            self.assertEqual([r["text"] for r in log.reports("2026-11-19")], ["rerun"])
+            log.close()
+
+            class Broken:
+                def save_report(self, *a):
+                    raise RuntimeError("database down")
+            asyncio.run(daily_report(bot, "2026-11-19", trade_log=Broken())("fallback"))
+            self.assertEqual(bot.daily, ["fallback"])               # never lost
 
 
 class SettingsTest(unittest.TestCase):

@@ -28,7 +28,7 @@ A separate Discord application ("Uri"), added to the server with **bot** + **app
 | | |
 |---|---|
 | Watchdog | Each bot writes a heartbeat every minute. A bot silent **3+ minutes** between 9:00 AM ET and 20 min after the close → @mention in `#system`; "✅ back" when it returns. The trading bots watch the head too (5 min, market hours, no effect on trading) |
-| Fleet summary | 4:35 PM ET each market day in `#daily-summary`: one line per bot (signals, alerts, orders, closed P&L, all-time), plus a fleet total once there are 2+ bots. Each bot's own 4:15 summary stays |
+| Daily summary | **The only poster in `#daily-summary`** (since 2026-11-20). Each bot hands its full 4:15 summary to the shared database instead of posting it; once every bot has reported (or at 5:00 PM ET, naming any that didn't) the head posts **one message**: one line per bot plus a fleet total once there are 2+ bots, and a **thread** under it with each bot's full summary (every signal, paper trades, costs, data check). Missed while the head was down → posted when it's back. If a bot can't reach the database, it posts its own summary so it's never lost. Needs the head's role to have **Create Public Threads** and **Send Messages in Threads** |
 | `/fleet` | Every bot: alive, paused, today's numbers, open trades and **money at risk across bots** (just for you) |
 | `/pause-all` · `/resume-all` | The shared global pause: no alerts or orders from any bot. A bot's own `/pause` is separate and stays as it was |
 | `/flatten-all confirm:yes` | Global pause on, then every live bot closes its own account with its own keys (within ~5 s) and answers; the head lists who did what. A bot that doesn't answer in 60 s is named so you can use its own `/flatten` |
