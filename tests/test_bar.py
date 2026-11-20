@@ -71,6 +71,8 @@ class DayTest(unittest.TestCase):
         self.s["target"].update(mode="5m", level_max_r=3.0)
         self.s["stop"]["max_stop_atr"] = 100
         self.s["exit"] = {"breakeven_at_r": None}
+        self.s["entry"] = {"midpoint": "candle", "small_body_atr": 0.5, "cancel_if_target_first": False}
+        self.s["filters"] = {"ath_longs_only_pct": None, "accumulation_since": None}
 
     def test_a_long_retest_to_2r(self):
         bars = day_bars({
@@ -169,11 +171,17 @@ class UserRulesTest(unittest.TestCase):
         self.s["window"]["breakouts_from"] = "06:00"
         self.s["stop"].update(swing_tf="15m", max_stop_atr=100)
         self.s["exit"] = {"breakeven_at_r": None}
+        self.s["target"]["mode"] = "flat"
+        self.s["entry"] = {"midpoint": "candle", "small_body_atr": 0.5, "cancel_if_target_first": False}
+        self.s["filters"] = {"ath_longs_only_pct": None, "accumulation_since": None}
 
-    def test_defaults_are_off(self):
-        self.assertEqual(S["entry"], {"midpoint": "candle", "small_body_atr": 0.5, "cancel_if_target_first": False})
-        self.assertEqual(S["filters"], {"ath_longs_only_pct": None, "accumulation_since": None})
-        self.assertEqual(S["target"]["mode"], "flat")
+    def test_defaults_are_the_baseline(self):
+        """Baseline run #52 = #49 (2026-11-20): rules 1–5 on, the user's 4h/1h/15m trend read."""
+        self.assertEqual(S["entry"], {"midpoint": "body", "small_body_atr": 0.5, "cancel_if_target_first": True})
+        self.assertEqual(S["filters"], {"ath_longs_only_pct": 0.5, "accumulation_since": "03:30"})
+        self.assertEqual((S["target"]["mode"], S["trend_filter"], S["trend_big_candles"], S["trend_legs_back"]),
+                         ("levels", "mtf", 0, 1))
+        self.assertEqual(S["exit"], {"breakeven_at_r": 1.0, "breakeven_level": None, "breakeven_level_min_r": 0.5})
 
     def test_body_midpoint_unless_small(self):
         ref = Bar(T0, 100, 130, 90, 110)                         # candle mid 110, body mid 105, body 10
@@ -221,6 +229,16 @@ class UserRulesTest(unittest.TestCase):
                 self.assertEqual(bar.run_day(bars, D, self.s).trade is not None, normal_trades)
                 self.s["trend_filter"] = "1h_inverse"
                 self.assertEqual(bar.run_day(bars, D, self.s).trade is not None, bias == "bear")
+
+    def test_breakeven_internal_level(self):
+        # 5m: a swing high at 125 (bar 2), a lower one at 112 (bar 6), neither taken; entry 100, 1R = 10, target 130
+        hs = [100, 105, 125, 106, 104, 110, 112, 108, 104, 103, 102]
+        bars = [b(i, h - 2, h, h - 4, h - 1) for i, h in enumerate(hs)]
+        t = T0 + len(bars) * bar.FIVE
+        self.assertEqual(bar.internal_level(True, 100, 10, 130, bars, bar.FIVE, t), 112)       # the first one out
+        self.assertEqual(bar.internal_level(True, 100, 10, 130, bars, bar.FIVE, t, min_r=1.5), 125)
+        self.assertIsNone(bar.internal_level(True, 100, 10, 120, bars, bar.FIVE, t, min_r=1.5))  # 125 is past the target
+        self.assertIsNone(bar.internal_level(True, 100, 10, 130, bars[:4], bar.FIVE, t))         # not confirmed yet
 
     def test_accumulation(self):
         bars = day_bars(self.LONG)

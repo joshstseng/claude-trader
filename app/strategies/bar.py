@@ -27,7 +27,9 @@
                4h, 1h and 15m each read by tf_bias (gaps decide, BOS/CISD confirm, trend_big_candles big
                candles), 2 of the 3 must agree with the breakout
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
-               optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R
+               optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R;
+               exit.breakeven_level "5m"/"15m" (the user's way): instead once price takes the first internal
+               high/low between entry and target (at least breakeven_level_min_r out); +1R if there's none
 
 Definitions (each counts only once it's confirmed, so a backtest never peeks):
     swing        a fractal: a high (low) above (below) the 2 bars on each side; confirmed when the 2nd bar after closes
@@ -367,6 +369,27 @@ def find_target_levels(long: bool, entry: float, risk: float, b15: list[Bar], h1
     return entry + sign * tg["flat_beyond_r"] * risk, f"{tg['flat_beyond_r']:g}R"
 
 
+def internal_level(long: bool, entry: float, risk: float, target: float, bars: list[Bar], span: timedelta,
+                   t: datetime, min_r: float = 0.5) -> float | None:
+    """exit.breakeven_level (2026-11-20): the first internal high (long; low for a short) between the entry and
+    the target, known by t and not yet taken, at least min_r from the entry; None if there isn't one."""
+    sign = 1 if long else -1
+    done = [b for b in bars if b.start + span <= t]
+    highs, lows = swings(done, span)
+    best = None
+    for p in (highs if long else lows):
+        if p[2] > t:
+            continue
+        r = (p[0] - entry) * sign / risk
+        if r < min_r or (p[0] - target) * sign >= 0:
+            continue
+        if any((x.h > p[0]) if long else (x.l < p[0]) for x in done[p[3] + 1:]):
+            continue
+        if best is None or abs(p[0] - entry) < abs(best - entry):
+            best = p[0]
+    return best
+
+
 def find_target(long: bool, entry: float, risk: float, b5: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
     """The most recent 5m lower high (long) / higher low (short) 2–3R away, else 2R (runs #27–#30)."""
     tg = s["target"]
@@ -552,7 +575,15 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
     tr = Trade8(day.isoformat(), side, ref.h, ref.l, brk.start.astimezone(PT).isoformat(timespec="minutes"),
                 fb.start.astimezone(PT).isoformat(timespec="minutes"), round(fill, 2), stop, src, target, tsrc,
                 n, bias)
-    be_r = (s.get("exit") or {}).get("breakeven_at_r")
+    ex = s.get("exit") or {}
+    be_r = ex.get("breakeven_at_r")
+    be_lvl = None
+    if ex.get("breakeven_level"):                 # the user's way: break-even once price takes the first internal level
+        be_lvl = internal_level(long, tr.entry, risk, target, b5 if ex["breakeven_level"] == "5m" else b15,
+                                FIVE if ex["breakeven_level"] == "5m" else FIFTEEN, fb.start,
+                                ex.get("breakeven_level_min_r", 0.5))
+        if be_lvl is not None:                    # found: it replaces +be_r (none: +be_r stays as the fallback)
+            be_r = None
     cur, why = stop, "stop"                       # the stop moves to entry once +be_r is reached (exit.breakeven_at_r)
     for j in range(fill_i, len(bars1)):
         b = bars1[j]
@@ -568,6 +599,8 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
         if b.start + ONE >= flat_t or j == len(bars1) - 1:
             _close(tr, b.c, at, "session_end", s)
             break
+        if be_lvl is not None and why == "stop" and ((b.h > be_lvl) if long else (b.l < be_lvl)):
+            cur, why = tr.entry, "be_stop"        # took the internal level -> stop to entry
         if be_r is not None and why == "stop":    # at this minute's close: +1R reached -> stop to entry
             best = (b.h - tr.entry) if long else (tr.entry - b.l)
             if best >= be_r * risk:
