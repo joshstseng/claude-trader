@@ -1,7 +1,8 @@
 """Mr. S: Bollinger mean-reversion on NQ futures (MNQ), Asia session first. Plan: plans/mrs-strategy.md
 
 Version A, "trend pullback" (the one built so far):
-    15m  RSI(14) > 55 -> longs only, < 45 -> shorts only;  ADX(14) > 20 (trending)
+    1h   RSI(14) > 55 -> longs only, < 45 -> shorts only (indicators.rsi_minutes)
+    15m  ADX(14) > 20 (trending) (indicators.adx_minutes)
     5m   a bar CLOSES outside the Bollinger Band (20, 2): below the lower band for a long, above the upper for a short
     5m   within the next 2 bars, the first bar with any part of its BODY back inside the band -> enter at its close
     stop the extreme of the cross bar and the entry bar (lowest low for a long), plus a small buffer
@@ -152,8 +153,8 @@ class Trade:
     target_2r: float
     middle_at_entry: float
     contracts: int
-    rsi15: float
-    adx15: float
+    rsi: float                    # on the RSI chart (indicators.rsi_minutes, e.g. 1h)
+    adx: float                    # on the ADX chart (indicators.adx_minutes, e.g. 15m)
     exit_at: str | None = None
     exit: float | None = None
     result: str | None = None     # middle / 2R / stop / session_end
@@ -192,22 +193,21 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
     ind = s["indicators"]
     bars5 = sorted(bars5, key=lambda b: b.start)
     bb = bollinger([b.c for b in bars5], ind["bb_length"], ind["bb_std"])
-    b15 = resample(bars5, ind["trend_minutes"])
-    r15 = rsi([b.c for b in b15], ind["rsi_length"])
-    a15 = adx(b15, ind["adx_length"])
-    ends15 = [b.start + timedelta(minutes=ind["trend_minutes"]) for b in b15]
-    tf = timedelta(minutes=ind["trend_minutes"])
+    rsi_min, adx_min = ind["rsi_minutes"], ind["adx_minutes"]
+    b_rsi, b_adx = resample(bars5, rsi_min), resample(bars5, adx_min)
+    v_rsi = rsi([b.c for b in b_rsi], ind["rsi_length"])
+    v_adx = adx(b_adx, ind["adx_length"])
+
+    def latest(bars, values, minutes, t_known):
+        """The value on the latest COMPLETE bar as of t_known (never one still forming)."""
+        span = timedelta(minutes=minutes)
+        for i in range(len(bars) - 1, -1, -1):
+            if bars[i].start + span <= t_known:
+                return values[i]
+        return None
 
     def trend_at(t_known: datetime):
-        """The latest COMPLETE 15m bar's (RSI, ADX) as of t_known."""
-        j = None
-        for i in range(len(b15) - 1, -1, -1):
-            if ends15[i] <= t_known:
-                j = i
-                break
-        if j is None or b15[j].start + tf > t_known:
-            return None, None
-        return r15[j], a15[j]
+        return latest(b_rsi, v_rsi, rsi_min, t_known), latest(b_adx, v_adx, adx_min, t_known)
 
     e, c, rules = s["entry"], s["contract"], s["exit"]
     last_entry = datetime.combine(start.date(), dtime.fromisoformat(s["session"]["last_entry"]), tzinfo=start.tzinfo)
@@ -320,7 +320,7 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
         r15v, a15v = trend_at(known)
         f = s["filters"]
         if r15v is None or a15v is None:
-            res.skipped.append({"at": t(i), "side": side, "why": "not enough 15m history"})
+            res.skipped.append({"at": t(i), "side": side, "why": "not enough history for RSI/ADX"})
             continue
         if a15v <= f["adx_min"]:
             res.skipped.append({"at": t(i), "side": side, "why": f"ADX {a15v:.1f} ≤ {f['adx_min']} (choppy)"})

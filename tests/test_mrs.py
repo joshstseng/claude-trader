@@ -14,11 +14,11 @@ D = date(2026, 11, 17)
 PT = mrs.PT
 
 
-def series(moves: dict[int, float] | None = None, chop: bool = False, end=dtime(22, 0)):
-    """5m NQ bars from 6:30 AM PT (warm-up: a steady uptrend, or chop) to `end`.
+def series(moves: dict[int, float] | None = None, chop: bool = False, end=dtime(22, 0), start=dtime(0, 30)):
+    """5m NQ bars from 12:30 AM PT (enough for a 1h RSI) (warm-up: a steady uptrend, or chop) to `end`.
     moves = {session bar k: close - open}, k = 0 is the 4:00 PM PT bar."""
     moves = moves or {}
-    t = datetime.combine(D, dtime(6, 30), tzinfo=PT)
+    t = datetime.combine(D, start, tzinfo=PT)
     stop_at = datetime.combine(D, end, tzinfo=PT)
     s_start = datetime.combine(D, dtime(16, 0), tzinfo=PT)
     bars, c, i = [], 20000.0, 0
@@ -73,7 +73,7 @@ class IndicatorTest(unittest.TestCase):
         self.assertIsNotNone(mrs.adx(mrs.resample(trend, 15))[27])
 
     def test_resample_keeps_only_whole_buckets(self):
-        bars = series(end=dtime(7, 35))           # 6:30 .. 7:30 = 13 bars -> 4 whole 15m bars
+        bars = series(end=dtime(7, 35), start=dtime(6, 30))   # 6:30 .. 7:30 = 13 bars -> 4 whole 15m bars
         out = mrs.resample(bars, 15)
         self.assertEqual([b.start.strftime("%H:%M") for b in out], ["06:30", "06:45", "07:00", "07:15"])
         self.assertEqual(out[0].o, bars[0].o)
@@ -163,14 +163,19 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(r.stopped_for_loss)
         self.assertIn("session loss limit", r.skipped[-1]["why"])
 
-    def test_no_peeking_at_an_unfinished_15m_bar(self):
-        """The trend reading at a 4:30 PM cross comes from the 4:15 bar (complete at 4:30), not the 4:30 one."""
-        bars = series(DIP)
-        r15 = mrs.rsi([b.c for b in mrs.resample(bars, 15)])
-        b15 = mrs.resample(bars, 15)
-        i = next(j for j, b in enumerate(b15) if b.start.astimezone(PT).strftime("%H:%M") == "16:15")
+    def test_no_peeking_at_an_unfinished_bar(self):
+        """At a 4:30 PM cross: RSI from the 3:00 PM 1h bar (complete at 4:00, the 4:00 one isn't done),
+        ADX from the 4:15 15m bar (complete at 4:30)."""
+        bars = series({**DIP, 0: 3.0, 1: -2.0, 2: 3.0, 3: -1.0})       # make the 4:00 hour differ from 3:00
+        h1 = mrs.resample(bars, 60)
+        r1 = mrs.rsi([b.c for b in h1])
+        i = next(j for j, b in enumerate(h1) if b.start.astimezone(PT).strftime("%H:%M") == "15:00")
+        m15 = mrs.resample(bars, 15)
+        a15 = mrs.adx(m15)
+        k = next(j for j, b in enumerate(m15) if b.start.astimezone(PT).strftime("%H:%M") == "16:15")
         t = mrs.run_session(bars, D, S).trades[0]
-        self.assertEqual(t.rsi15, round(r15[i], 1))
+        self.assertEqual(t.rsi, round(r1[i], 1))
+        self.assertEqual(t.adx, round(a15[k], 1))
 
     def test_sizing(self):
         self.assertEqual(mrs.contracts_for(30, S), 8)          # $500 / (30 × $2 + $2.50) = 8
@@ -191,9 +196,9 @@ class BacktestTest(unittest.TestCase):
             doc = json.loads((Path(d) / "r" / f"run-{res.run_id}.json").read_text())
             self.assertEqual(doc["settings"]["strategy"]["id"], "mrs")
             text = bt.summary(doc)
-            self.assertIn("[Mr. S] Backtest", text)
+            self.assertIn("Mr. S · Backtest", text)
             self.assertIn("1 trades", text)
-            self.assertIn("far too few", text)
+            self.assertIn("too few to judge", text)
             res2 = bt.run(D, D, label="ADX 101", overrides=["filters.adx_min=101"], db_path=Path(d) / "b.db",
                           reports=Path(d) / "r", bars=bars)
             self.assertEqual(res2.headline["trades"], 0)

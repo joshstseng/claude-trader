@@ -18,7 +18,8 @@
     "bb_std": 2.0,
     "rsi_length": 14,
     "adx_length": 14,
-    "trend_minutes": 15
+    "rsi_minutes": 60,
+    "adx_minutes": 15
   },
   "filters": {
     "rsi_long_above": 55,

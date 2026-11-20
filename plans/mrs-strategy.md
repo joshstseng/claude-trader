@@ -19,7 +19,7 @@ Not registered as a live bot yet (`enabled: false`, not in `BRAINS`): the shared
 |---|---|
 | Market | NQ data (`NQ=F`), traded as MNQ: same price, **$2 a point**, tick 0.25 = $0.50 |
 | Session | **4:00–10:00 PM PT** (7 PM–1 AM ET); last entry by 9:45 PM PT; everything flat at 10:00 PM |
-| Trend (15m) | RSI(14) **> 55 → longs only**, **< 45 → shorts only**; ADX(14) **> 20** (trending). From the last *finished* 15m bar, never one still forming |
+| Trend | **1h** RSI(14) **> 55 → longs only**, **< 45 → shorts only** *(changed from 15m on 2026-11-20)*; **15m** ADX(14) **> 20** (trending). Each from its last *finished* bar, never one still forming |
 | Setup (5m) | A bar **closes outside** the Bollinger Band (20, 2): below the lower band → long, above the upper → short |
 | Entry (5m) | Within the next **2 bars** (10 min), the first bar with **any part of its body back inside** the band; enter at its close. Otherwise the setup is dropped |
 | Stop | The **extreme** of the setup bar and the entry bar (lowest low for a long, highest high for a short), plus **2 ticks** |

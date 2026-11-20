@@ -29,7 +29,7 @@ from app.strategies import mrs
 
 log = logging.getLogger(__name__)
 CACHE = paths.SHARED_DATA_DIR / "bars" / "futures"
-WARMUP = timedelta(days=4)            # history before each session (covers a weekend) for the 15m ADX
+WARMUP = timedelta(days=4)            # history before each session (covers a weekend) for RSI and ADX
 SMALL_SAMPLE = 100
 DATA_NOTE = "Yahoo NQ=F 5m (front month, cached)"
 
@@ -150,6 +150,7 @@ def headline(sessions: list[mrs.SessionResult], s: dict) -> dict:
             "avg_r_gross": gross / risk if risk else 0.0, "total_usd": sum(pnl), "costs_usd": sum(t.cost_usd for t in trades),
             "max_dd_usd": dd, "avg_contracts": sum(t.contracts for t in trades) / n,
             "avg_stop_pts": sum(abs(t.entry - t.stop) for t in trades) / n,
+            "avg_risk_usd": risk / n,
             "best_session_usd": max(by_session), "worst_session_usd": min(by_session),
         })
     return m
@@ -219,47 +220,77 @@ def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
     return best
 
 
+def _r2(x: float) -> str:
+    return f"{x:+.2f}R".replace("-", "−")
+
+
+def _skips(skips: dict) -> str:
+    """Grouped for reading: the two RSI sides count as one."""
+    out: Counter = Counter()
+    for k, v in skips.items():
+        out["RSI" if k.startswith("RSI") else k.split(" (")[0]] += v
+    return " · ".join(f"{k} ({v})" for k, v in out.most_common(3))
+
+
+def _hours(start: str, end: str) -> str:
+    """'16:00', '22:00' -> '4–10 PM'."""
+    def h(x):
+        t = datetime.strptime(x, "%H:%M")
+        return t.strftime("%-I:%M").replace(":00", ""), t.strftime("%p")
+    (a, pa), (b, pb) = h(start), h(end)
+    return f"{a}–{b} {pb}" if pa == pb else f"{a} {pa}–{b} {pb}"
+
+
 def summary(doc: dict, baseline: dict | None = None) -> str:
+    """The #backtests message: the result first, a few short lines, the fine print small."""
     m, s = doc["headline"], doc["settings"]["strategy"]
     sess = s["session"]
-    head = f"**[Mr. S] Backtest #{doc['run_id']}: {doc['label']}**"
     period = (f"{_day(doc['first_session'])} → {_day(doc['last_session'])}" if doc.get("first_session")
               else f"{_day(doc['from'])} → {_day(doc['to'])}")
-    where = f"{m['sessions']} {sess['name']} sessions ({sess['start']}–{sess['end']} PT)"
+    lines = [f"## 🧪 Mr. S · Backtest #{doc['run_id']} · {doc['label']}",
+             f"-# {sess['name']} {_hours(sess['start'], sess['end'])} PT · {period} · {m['sessions']} sessions"]
     if not m["trades"]:
-        return f"{head}\n{period} · {where} · no trades."
-    res = m["results"]
-    lines = [
-        head,
-        f"{period} · {where} · **{m['trades']} trades** ({m['longs']} long, {m['shorts']} short) · "
-        f"win rate {m['win_rate'] * 100:.0f}%",
-        f"**{_r(m['avg_r'])} a trade** after costs · total **{_usd(m['total_usd'])}** ({m['total_r']:+.1f}R) on "
-        f"${m['account_usd']:,.0f} · worst drawdown {_usd(m['max_dd_usd'])} · before costs {_r(m['avg_r_gross'])}",
-        f"🎯 {res.get('2R', 0)} at 2R · ↩️ {res.get('middle', 0)} middle band · ❌ {res.get('stop', 0)} stop · "
-        f"⏰ {res.get('session_end', 0)} session end · avg stop {m['avg_stop_pts']:.1f} pts, "
-        f"{m['avg_contracts']:.1f} MNQ · costs {_usd(-m['costs_usd'])}",
-    ]
-    if m["skips"]:
-        top = list(m["skips"].items())[:4]
-        lines.append("Skipped: " + " · ".join(f"{k} ({v})" for k, v in top))
+        lines.append("No trades.")
+    else:
+        res = m["results"]
+        icon = "📈" if m["total_usd"] > 0 else "📉"
+        lines += [
+            "",
+            f"{icon} **{_usd(m['total_usd'])}**  ·  {_r2(m['avg_r'])} a trade  ·  "
+            f"{m['trades']} trades  ·  {m['win_rate'] * 100:.0f}% win",
+            "",
+            f"**Exits** 🎯 {res.get('2R', 0)} at 2R · ↩️ {res.get('middle', 0)} middle · ❌ {res.get('stop', 0)} stop"
+            + (f" · ⏰ {res['session_end']} at close" if res.get("session_end") else ""),
+            f"**Sides** {m['longs']} long · {m['shorts']} short",
+            f"**Risk** ~{_usd(m.get('avg_risk_usd', 0)).lstrip('+')} a trade · worst drawdown {_usd(m['max_dd_usd'])}",
+        ]
+        if baseline and baseline["headline"].get("trades"):
+            bm = baseline["headline"]
+            diff = m["avg_r"] - bm["avg_r"]
+            arrow = "▲" if diff > 0 else "▼" if diff < 0 else "="
+            dt = m["trades"] - bm["trades"]
+            lines.append(f"**vs baseline #{baseline['run_id']}** {arrow} {_r2(diff)} a trade · "
+                         f"{_usd(m['total_usd'] - bm['total_usd'])} · "
+                         + (f"{abs(dt)} {'more' if dt > 0 else 'fewer'} trades" if dt else "same trades"))
+    lines.append("")
     if doc["settings"].get("overrides"):
-        lines.append(f"Changed: `{'`, `'.join(doc['settings']['overrides'])}`")
-    if baseline and baseline["headline"].get("trades"):
-        b = baseline["headline"]
-        diff = m["avg_r"] - b["avg_r"]
-        word = "better" if diff > 0 else "worse" if diff < 0 else "the same"
-        lines.append(f"vs baseline (#{baseline['run_id']}): **{_r(diff)} a trade {word}** · "
-                     f"total {_usd(m['total_usd'] - b['total_usd'])} · trades {m['trades'] - b['trades']:+d}")
-    verdict = "📈 positive after costs" if m["avg_r"] > 0 else "📉 loses money after costs"
-    if m["trades"] < SMALL_SAMPLE:
-        verdict += f" · ⚠️ only {m['trades']} trades: far too few to judge (a few hundred needed)"
-    lines.append(f"{verdict} · {doc['settings']['data']} · code `{doc.get('code', '?')}`")
+        lines.append(f"-# Changed: {', '.join(doc['settings']['overrides'])}")
+    if m.get("skips"):
+        lines.append(f"-# Skipped: {_skips(m['skips'])}")
+    fine = []
+    if m["trades"]:
+        fine.append(f"costs {_usd(-m['costs_usd'])}")
+        if m["trades"] < SMALL_SAMPLE:
+            fine.append(f"⚠️ {m['trades']} trades is too few to judge")
+    fine += [doc["settings"]["data"], f"code {doc.get('code', '?')}"]
+    lines.append("-# " + " · ".join(fine))
     return "\n".join(lines)
 
 
 def report_md(doc: dict) -> str:
     m = doc["headline"]
-    out = [f"# Mr. S backtest #{doc['run_id']}: {doc['label']}", "", summary(doc).replace("**", ""), "",
+    text = "\n".join(x[3:] if x.startswith("-# ") else x for x in summary(doc).replace("**", "").splitlines()[1:])
+    out = [f"# Mr. S backtest #{doc['run_id']}: {doc['label']}", "", text, "",
            "## Settings", "```json", json.dumps(doc["settings"]["strategy"], indent=1), "```", ""]
     if m.get("skips"):
         out += ["## Setups skipped", "| Why | Count |", "|---|---|"]
@@ -270,8 +301,8 @@ def report_md(doc: dict) -> str:
             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for t in doc["trades"]:
         out.append(f"| {t['day']} | {t['side']} | {t['cross_at'][11:16]} | {t['entry_at'][11:16]} | {t['entry']} | "
-                   f"{t['stop']} | {t['target_2r']} | {t['middle_at_entry']} | {t['contracts']} | {t['rsi15']} | "
-                   f"{t['adx15']} | {(t['exit_at'] or '')[11:16]} | {t['exit']} | {t['result']} | {t['r']:+.2f} | "
+                   f"{t['stop']} | {t['target_2r']} | {t['middle_at_entry']} | {t['contracts']} | {t.get('rsi', t.get('rsi15'))} | "
+                   f"{t.get('adx', t.get('adx15'))} | {(t['exit_at'] or '')[11:16]} | {t['exit']} | {t['result']} | {t['r']:+.2f} | "
                    f"{t['pnl_usd']:+,.0f} |")
     return "\n".join(out) + "\n"
 
