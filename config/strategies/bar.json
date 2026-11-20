@@ -19,6 +19,7 @@
   },
   "trend_filter": "1h",
   "trend_big_candles": 2,
+  "trend_legs_back": 0,
   "filters": {
     "ath_longs_only_pct": null,
     "accumulation_since": null
