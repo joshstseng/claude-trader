@@ -2,7 +2,7 @@
   "id": "snap",
   "name": "Snap (index ETF dip-buyer)",
   "enabled": false,
-  "note": "Backtest only (app/strategies/snap.py, app/backtest/snap.py). Found by the research lab 2026-11-20: passed the pre-set bar on its one look at 2024-2026 (run #70). Not wired to any live bot.",
+  "note": "Backtest only (app/strategies/snap.py, app/backtest/snap.py). Found by the research lab 2026-11-20: passed the pre-set bar on its one look at 2024-2026 (run #70). Default fills = next_open (decide after the close, trade at the next open; the live plan), chosen by the user 2026-11-20. 1% risk.",
   "universe": [
     "QQQ",
     "SPY",
@@ -24,7 +24,7 @@
     "atr_mult": 3.0
   },
   "fills": {
-    "mode": "close",
+    "mode": "next_open",
     "note": "close = market-on-close at today's close (run #70/#71); next_open = decide after the close, trade at the next open (the live plan)"
   },
   "account": {

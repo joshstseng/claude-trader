@@ -46,7 +46,7 @@ Orbi's code paths stay as they are. The usual regression checks apply: full test
 2. **Create a new Alpaca paper account** with **margin** (all 4 ETFs at once can use about $103k of buying power).
 3. **Create a new Railway service** with the same repo, a `/data` volume and `STRATEGY=snap`.
 
-## Open questions for you
-1. **Close or open?** Is trading at the open (the plan above) fine, or do you want the at-the-close version?
-2. **Risk:** stay at 1% a trade? Profits scale with it. At 1% it's about +$2.6k a year on $50k.
-3. **Avatar and announcement:** Snap's avatar, and an announcement in the bots channel?
+## Decided (2026-11-20)
+1. **Trade at the next open.** The user said "whichever is better". The two are about even on paper, but this version is what Snap can actually do live, so it's now Snap's default (baseline **run #75**: 721 trades, +$29.0k, a profit factor of 1.67).
+2. **1% risk a trade** for now; it can change later.
+3. **No Discord bot yet:** the user isn't at a computer. P1 waits until they are.

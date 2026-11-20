@@ -28,10 +28,12 @@ def series(closes, rng=1.0):
 class SnapTest(unittest.TestCase):
     def setUp(self):
         self.s = copy.deepcopy(S)
+        self.s["fills"] = {"mode": "close"}           # most tests check the at-the-close machinery
 
     def test_config_is_off_and_not_a_live_bot(self):
         from app.strategies import KNOWN
         self.assertFalse(S["enabled"])
+        self.assertEqual(S["fills"]["mode"], "next_open")            # the default since 2026-11-20
         self.assertNotIn("snap", KNOWN)                   # never started by the bot runner
 
     def test_buys_a_dip_in_an_uptrend_and_sells_the_snap_back(self):

@@ -58,7 +58,7 @@ The **pass bar was fixed before any testing**:
 
   (profit factor over 2016–2026)
 - **Baseline:** run #71, 2016-01 to 2026-10: 707 trades, +$28.6k, a profit factor of 1.69, and a worst drawdown of −$4.1k (in 2018).
-- **The live-plan variant, run #74** (decide after the close, trade at the next open): 721 trades, +$29.0k, a profit factor of 1.67, and a worst drawdown of −$5.2k. It also passes the bar. Turn it on with `--set fills.mode="next_open"`.
+- **The default since 2026-11-20 (the user's choice) is the live-plan variant. Baseline run #75** = run #74 (decide after the close, trade at the next open): 721 trades, +$29.0k, a profit factor of 1.67, and a worst drawdown of −$5.2k. It also passes the bar. Turn it on with `--set fills.mode="next_open"`.
 
 ## The same rules on 18 ETFs it never saw
 Unchanged rules, 2016–2026. **17 of 18 are profitable.**
