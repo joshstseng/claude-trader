@@ -64,6 +64,11 @@ class DayTest(unittest.TestCase):
     def setUp(self):
         self.s = copy.deepcopy(S)
         self.s["stop"]["max_stop_atr"] = 100                                  # the synthetic ATR is tiny
+        # the machinery under the first rules (runs #27–#30); the 1h stop/target have their own tests
+        self.s.update(trend_filter="none")
+        self.s["window"]["breakouts_from"] = "06:00"
+        self.s["stop"]["swing_tf"] = "15m"
+        self.s["target"].update(mode="5m", level_max_r=3.0)
 
     def test_a_long_retest_to_2r(self):
         bars = day_bars({
@@ -101,9 +106,38 @@ class DayTest(unittest.TestCase):
         self.assertIsNone(mrs8.find_stop(True, 100, 98, 102, flat, flat, t, self.s)[0])   # 2 pts: under 5 min
         self.assertEqual(mrs8.find_stop(True, 100, 90, 110, [], [], T0, self.s), (None, "not enough 15m history"))
 
+    def test_setups_start_at_605(self):
+        bars = day_bars({"04:00": (19970, 19972), "04:05": (19971, 19990), "04:10": (19989, 19998),
+                         "05:00": (19995, 19996), "05:05": (19995, 20004), "05:10": (19999, 20005),
+                         "06:00": (20004, 20015), "06:05": (20014, 20016),
+                         "06:10": (19999, 20003), "06:15": (20002, 20060)})
+        s = copy.deepcopy(self.s)
+        s["window"]["breakouts_from"] = "06:05"
+        t = mrs8.run_day(bars, D, s).trade
+        self.assertEqual(t.break_at[11:16], "06:05")                           # the 6:00 close doesn't count
+
     def test_no_breakout(self):
         bars = day_bars({"05:00": (19900, 19905), "05:05": (19900, 20100), "05:10": (19950, 20000)})
         self.assertEqual(mrs8.run_day(bars, D, self.s).why, "no breakout by 8:00")
+
+
+class TargetTest(unittest.TestCase):
+    def h(self, i, o, hi, lo, c):
+        return Bar(T0 + i * mrs8.HOUR, o, hi, lo, c)
+
+    def test_1h_swing_or_unfilled_fvg_whichever_is_nearer(self):
+        s = copy.deepcopy(S)
+        # a 1h swing high at 130 (bar 2), then a gap down leaving an unfilled FVG 112..118 (bars 4-6)
+        h1 = [self.h(0, 100, 105, 99, 104), self.h(1, 104, 110, 103, 109), self.h(2, 109, 130, 108, 125),
+              self.h(3, 125, 126, 118, 119), self.h(4, 119, 121, 118, 120), self.h(5, 120, 120, 105, 106),
+              self.h(6, 106, 112, 100, 101), self.h(7, 101, 103, 99, 100), self.h(8, 100, 102, 98, 99)]
+        t = T0 + 9 * mrs8.HOUR
+        price, src = mrs8.find_target_1h(True, 100, 5, h1, t, s)       # 1R = 5: FVG at 2.4R, swing at 6R
+        self.assertEqual((price, src[:6]), (112, "1h FVG"))
+        price, src = mrs8.find_target_1h(True, 100, 2, h1, t, s)       # 1R = 2: FVG at 6R (> 4R): no level
+        self.assertEqual((price, src), (104, "2R"))
+        price, src = mrs8.find_target_1h(True, 100, 8, h1, t, s)       # 1R = 8: FVG 1.5R (< 2R), swing 3.75R
+        self.assertEqual((price, src[:13]), (130, "1h swing high"))
 
 
 if __name__ == "__main__":

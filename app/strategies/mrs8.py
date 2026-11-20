@@ -1,15 +1,18 @@
 """Mr. S, "8 AM retest" (strategy id mrs8): NQ/MNQ, NY AM. Your rules (2026-11-20), all times Pacific:
 
     reference  the 5:00–5:15 AM 15m candle (8:00 AM ET): its high, low and midpoint
-    breakout   from the 6:00 AM 5m bar on, the first 5m candle that CLOSES beyond the reference high (long)
+    breakout   from the 6:05 AM 5m bar on (window.breakouts_from), the first 5m candle that CLOSES beyond the
+               reference high (long)
                or low (short); only the first breakout counts, one trade a day, no re-entry
     entry      a limit order at the midpoint, in the breakout's direction; cancelled if not filled by 8:00 AM
                (a backtest fill needs price to trade through the midpoint by a tick)
-    stop       (long; a short mirrors it) in this order: the nearest 15m swing low below the reference candle
+    stop       (long; a short mirrors it) in this order: the most recent 1h swing low below the reference candle
+               (stop.swing_tf; "15m" = the nearest 15m swing low, as in runs #27–#30)
                that still holds; if that's too far (> max_stop_atr × the 15m ATR), the nearest holding 15m
                order block, then 15m FVG, then 5m FVG, then 5m order block; worst case the 8:00 candle's
                far side (its low for a long); 2 ticks beyond the level
-    target     the most recent 5m lower high (higher low for a short) when it's 2–3R away, otherwise 2R
+    target     (target.mode "1h") the nearer of the most recent 1h swing high ≥ 2R away and an unfilled 1h FVG,
+               each within 4R; otherwise 2R. ("5m": the most recent 5m lower high 2–3R away, runs #27–#30)
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
                last 1h break of structure; breakouts against it are skipped
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM
@@ -126,7 +129,7 @@ def bias_1h(h1: list[Bar], t: datetime) -> tuple[str | None, str]:
 
 
 def find_stop(long: bool, entry: float, ref_lo: float, ref_hi: float, b15: list[Bar], b5: list[Bar],
-              t: datetime, s: dict) -> tuple[float | None, str]:
+              t: datetime, s: dict, h1: list[Bar] | None = None) -> tuple[float | None, str]:
     """(stop level before the buffer, where it came from) or (None, why not)."""
     st = s["stop"]
     a = atr(b15, FIFTEEN, t)
@@ -135,14 +138,20 @@ def find_stop(long: bool, entry: float, ref_lo: float, ref_hi: float, b15: list[
     far = st["max_stop_atr"] * a
     ok = lambda lvl: st["min_stop_points"] <= ((entry - lvl) if long else (lvl - entry)) <= far   # noqa: E731
 
-    # 1. the nearest holding 15m swing low below the reference candle (high above, for a short)
-    highs, lows = swings(b15, FIFTEEN)
+    # 1. a holding swing low below the reference candle (high above, for a short):
+    #    stop.swing_tf "1h": the MOST RECENT 1h one (2026-11-20); "15m": the nearest 15m one (runs #27–#30)
+    tf_1h = st.get("swing_tf", "15m") == "1h" and h1 is not None
+    sb, span, name = (h1, HOUR, "1h") if tf_1h else (b15, FIFTEEN, "15m")
+    highs, lows = swings(sb, span)
     pts = [p for p in (lows if long else highs) if p[2] <= t and ((p[0] < ref_lo) if long else (p[0] > ref_hi))
-           and _holds(b15, p[3], p[0], long, FIFTEEN, t)]
+           and _holds(sb, p[3], p[0], long, span, t)]
     if pts:
-        level = max(p[0] for p in pts) if long else min(p[0] for p in pts)
+        if tf_1h:
+            level = max(pts, key=lambda p: p[1])[0]                       # the most recent
+        else:
+            level = max(p[0] for p in pts) if long else min(p[0] for p in pts)
         if ok(level):
-            return level, "15m swing low" if long else "15m swing high"
+            return level, f"{name} swing {'low' if long else 'high'}"
 
     def zone(cands, bars, span, name):
         kind = "bull" if long else "bear"
@@ -169,8 +178,38 @@ def find_stop(long: bool, entry: float, ref_lo: float, ref_hi: float, b15: list[
     return None, "no swing, order block or FVG, and the 8:00 candle is too small"
 
 
+def find_target_1h(long: bool, entry: float, risk: float, h1: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
+    """target.mode "1h" (2026-11-20): the nearer of (a) the most recent 1h swing high (low, for a short) at least
+    level_min_r away and (b) an unfilled 1h FVG beyond the entry (its near edge), each within level_max_r;
+    otherwise default_r."""
+    tg = s["target"]
+    sign = 1 if long else -1
+    lo_r, hi_r = tg["level_min_r"], tg["level_max_r"]
+    in_r = lambda x: lo_r <= (x - entry) * sign / risk <= hi_r                    # noqa: E731
+    done = [b for b in h1 if b.start + HOUR <= t]
+    cands = []
+    highs, lows = swings(done, HOUR)
+    for p in reversed(highs if long else lows):                                # the most recent first
+        if (p[0] - entry) * sign / risk >= lo_r:
+            if in_r(p[0]):
+                cands.append((p[0], "1h swing " + ("high" if long else "low")))
+            break
+    for g in fvgs(done, HOUR):
+        near = g["lo"] if long else g["hi"]
+        far = g["hi"] if long else g["lo"]
+        if (near - entry) * sign <= 0:
+            continue
+        filled = any((x.h >= far) if long else (x.l <= far) for x in done[g["j"] + 1:])
+        if not filled and in_r(near):
+            cands.append((near, "1h FVG"))
+    if cands:
+        price, src = min(cands, key=lambda c: abs(c[0] - entry))
+        return price, f"{src} ({(price - entry) * sign / risk:.1f}R)"
+    return entry + sign * tg["default_r"] * risk, f"{tg['default_r']:g}R"
+
+
 def find_target(long: bool, entry: float, risk: float, b5: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
-    """The most recent 5m lower high (long) / higher low (short) 2–3R away, else 2R."""
+    """The most recent 5m lower high (long) / higher low (short) 2–3R away, else 2R (runs #27–#30)."""
     tg = s["target"]
     highs, lows = swings(b5, FIVE)
     pts = [p for p in (highs if long else lows) if p[2] <= t]
@@ -269,7 +308,7 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
 
     # ---- stop and target (known when the order goes in)
     entry = _tick(mid, c["tick"], not long)                  # a long buys at or below the midpoint
-    level, src = find_stop(long, entry, ref.l, ref.h, b15, b5, placed, s)
+    level, src = find_stop(long, entry, ref.l, ref.h, b15, b5, placed, s, h1=h1)
     if level is None:
         out.why = src
         return out
@@ -280,7 +319,10 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
     if n < 1:
         out.why = f"stop too wide for 1% ({risk:.1f} pts)"
         return out
-    target, tsrc = find_target(long, entry, risk, b5, placed, s)
+    if s["target"].get("mode", "5m") == "1h":
+        target, tsrc = find_target_1h(long, entry, risk, h1, placed, s)
+    else:
+        target, tsrc = find_target(long, entry, risk, b5, placed, s)
     target = round(target, 2)
 
     # ---- fill (trade-through by a tick), then manage minute by minute
