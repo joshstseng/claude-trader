@@ -8,7 +8,7 @@ Your strategy (2026-11-20), "Mr. S" in Discord, strategy id `mrs`. **Micro Nasda
 | Rules, indicators, the session walk (`app/strategies/mrs.py`, `config/strategies/mrs.json`, `tests/test_mrs.py`) | ✅ built 2026-11-20 |
 | Backtest scenarios (one combination at a time, each a saved, repeatable run) | ⬜ next |
 | 1m data (years of it) for the real backtest and the 1m entry | ⬜ Databento free credits, or a Kaggle dataset |
-| Live bot: Tradovate demo, Discord cards, its own Railway service | ⬜ later, only if the backtest earns it |
+| Live bot: Tradovate demo, Discord cards, its own Railway service | ⬜ later, only if the backtest earns it ([mrs-discord.md](mrs-discord.md): M1 join the server → M2 shadow mode → M3 demo) |
 | NY AM session | ⬜ after Asia |
 | Range-fade version (ADX < 20, both sides) | ⬜ eventually |
 
