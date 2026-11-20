@@ -43,7 +43,7 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
 
 ## Hard
 
-- [ ] **9. The "stronger" stop level.** Put the stop behind the level that has already been tested or respected: a 15m high that rejected price, an order block's body, the low an earlier candle bounced from (10/12, 10/13, 10/29).
+- [ ] **9. The "stronger" stop level.** *First test: the most recent 15m swing first (`stop.swing_tf="15m"` on #49): run #50, +0.052R (vs +0.078R); matches the user on 10/7 (12.2 vs 13.2 pts). Without the 1R break-even (#51): +0.002R, so break-even at 1R helps over 6 years. User's reasons: 10/7 the most recent respected level (the 8:00 candle's own wick area); 10/8 the 3:30 AM wick low = the most recent 1h low (Brix used the same level, 30876 cash, but its distance from entry is 75 pts vs the user's 31; prices to check).* Put the stop behind the level that has already been tested or respected: a 15m high that rejected price, an order block's body, the low an earlier candle bounced from (10/12, 10/13, 10/29).
   - The user's stops ran about 35 points (median) against Brix's 75.
   - *To decide:* a testable definition of "stronger".
 
