@@ -6,24 +6,24 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
 
 ## Easy
 
-- [ ] **1. Enter at the body midpoint.** The limit order goes at the midpoint of the 8:00 ET 15m candle's **body** (open to close), not the whole candle. If the body is small, use the whole candle, wicks included (10/7).
+- [x] **1. Enter at the body midpoint.** *Built (`entry.midpoint="body"`, small = body < 0.5 × 15m ATR). Run #36: −0.004R a trade vs −0.006R, a wash.* The limit order goes at the midpoint of the 8:00 ET 15m candle's **body** (open to close), not the whole candle. If the body is small, use the whole candle, wicks included (10/7).
   - Brix missed fills on 10/9, 10/12 and 10/28, all wins for the user.
   - *To decide:* what counts as "small" (e.g. a body under X points, or under half the candle's range).
 
-- [ ] **2. Cancel the order if the target is reached first.** If price reaches the target level before the limit fills, the move has happened without us, so cancel.
+- [x] **2. Cancel the order if the target is reached first.** *Built (`entry.cancel_if_target_first`). Run #37: 355 trades, −0.017R a trade, but worst drawdown −$9.3k vs −$17.0k.* If price reaches the target level before the limit fills, the move has happened without us, so cancel.
   - Days: 10/1, 10/13, 10/14, 10/16; 10/23 was the user's "bad trade, should have gotten out".
 
-- [ ] **3. The user's target rule.**
+- [x] **3. The user's target rule.** *Built (`target.mode="levels"`, big stop = > 2 × 15m ATR). Run #38: −0.023R a trade, worse.*
   - Target the nearest internal high or low (or an unfilled 1h FVG) if it's at least 2R away.
   - If the next level is beyond 3R, use a flat 3R.
   - If the stop is large in points, use 2R.
   - Today Brix uses a flat 2R; the user's wins averaged 2.3R.
   - *To decide:* what counts as a "large" stop.
 
-- [ ] **4. Longs only near an all-time high.** When the 8:00 candle sits near the all-time high, take no shorts (10/2, 10/6).
+- [x] **4. Longs only near an all-time high.** *Built (`filters.ath_longs_only_pct=0.5`: the latest 1h swing high is the ATH, or within 0.5%). Run #39: 15 shorts skipped, −0.006R, no change.* When the 8:00 candle sits near the all-time high, take no shorts (10/2, 10/6).
   - *To decide:* how near counts (e.g. within 0.5%).
 
-- [ ] **5. No trade in accumulation.** No trade if no 5m or 15m FVG has formed since 3:30 AM PT (10/21).
+- [x] **5. No trade in accumulation.** *Built (`filters.accumulation_since="03:30"`). Run #40: never triggered, since some 5m gap always forms in the data. Needs a tighter definition.* No trade if no 5m or 15m FVG has formed since 3:30 AM PT (10/21).
 
 ## Medium
 
