@@ -39,7 +39,7 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
 - [x] **7. Break-even at the first internal level, instead of at a fixed 1R.** *Built (`exit.breakeven_level` "5m"/"15m": the nearest untaken internal high/low between entry and target, at least 0.5R out; +1R if there's none). Against the new baseline #52: 5m run #53 +0.050R, 15m run #54 +0.074R vs +0.078R. With the fallback at **2R instead of 1R** (user, 2026-11-20): 15m run #55 **+0.092R, +$15.7k, the best so far**; 5m run #56 +0.083R.* Move the stop to break-even once price takes out the first internal low (high for a long) after entry (10/12, 10/20, 10/22, 10/28).
   - The user also moves to break-even when a lower-timeframe gap is disrespected (10/26). That's a later refinement.
 
-- [ ] **8. Trail the stop in profit.** After a new internal low forms (high for a long), trail the stop to the newest higher-timeframe FVG: 5m, then 3m, then 1m (10/22, 10/26, 10/27).
+- [x] **8. Trail the stop in profit.** *Built (`exit.trail_gaps`): after a pullback into a new 5m gap (1m gaps once past 2R), when price breaks the internal high made before it, the stop goes to the pullback low. Run #60: **+0.102R, +$17.9k, drawdown −$10.1k** (baseline #57: +0.092R). Plus the user's extra break-even trigger (`exit.breakeven_sig5m`: a 5m internal high whose wick sat in a bearish 5m+ FVG): alone #61 +0.093R, both #62 +0.103R.* After a new internal low forms (high for a long), trail the stop to the newest higher-timeframe FVG: 5m, then 3m, then 1m (10/22, 10/26, 10/27).
 
   - *Later (user, 2026-11-20):* order blocks (10/22) and retrace swing lows (10/27) as trail levels too, not yet.
 

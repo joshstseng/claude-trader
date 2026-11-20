@@ -43,7 +43,10 @@
   "exit": {
     "breakeven_at_r": 2.0,
     "breakeven_level": "15m",
-    "breakeven_level_min_r": 0.5
+    "breakeven_level_min_r": 0.5,
+    "breakeven_sig5m": false,
+    "trail_gaps": false,
+    "trail_1m_after_r": 2.0
   },
   "account": {
     "size_usd": 50000,

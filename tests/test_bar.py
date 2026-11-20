@@ -181,7 +181,8 @@ class UserRulesTest(unittest.TestCase):
         self.assertEqual(S["filters"], {"ath_longs_only_pct": 0.5, "accumulation_since": "03:30"})
         self.assertEqual((S["target"]["mode"], S["trend_filter"], S["trend_big_candles"], S["trend_legs_back"]),
                          ("levels", "mtf", 0, 1))
-        self.assertEqual(S["exit"], {"breakeven_at_r": 2.0, "breakeven_level": "15m", "breakeven_level_min_r": 0.5})
+        self.assertEqual(S["exit"], {"breakeven_at_r": 2.0, "breakeven_level": "15m", "breakeven_level_min_r": 0.5,
+                                     "breakeven_sig5m": False, "trail_gaps": False, "trail_1m_after_r": 2.0})
 
     def test_body_midpoint_unless_small(self):
         ref = Bar(T0, 100, 130, 90, 110)                         # candle mid 110, body mid 105, body 10
@@ -251,6 +252,30 @@ class UserRulesTest(unittest.TestCase):
         self.assertEqual(tr.result, "trail_stop")                             # the quiet chop takes out a body low
         self.assertGreater(tr.exit_at[11:16], "06:29")
         self.assertGreater(tr.r, 1.0)                                         # locked in the move
+
+    def test_trail_to_the_pullback_low(self):
+        bars = day_bars({**self.LONG,
+                         "06:30": (20045, 20050),     # a pullback into the new 5m gap (20030..20059)
+                         "06:35": (20049, 20095),     # breaks the 20080 high: stop to the pullback low
+                         "06:40": (19990, 19995)})    # and back down through it
+        self.s["target"].update(mode="flat", default_r=20)
+        self.s["exit"] = {"breakeven_at_r": None, "trail_gaps": True, "trail_1m_after_r": 2.0}
+        tr = bar.run_day(bars, D, self.s).trade
+        self.assertEqual(tr.result, "trail_stop")
+        self.assertAlmostEqual(tr.exit, 20044.25, delta=1.0)
+        self.assertGreater(tr.r, 1.0)
+        self.s["exit"]["trail_gaps"] = False
+        self.assertNotEqual(bar.run_day(bars, D, self.s).trade.result, "trail_stop")
+
+    def test_sig_level_needs_the_wick_in_a_gap(self):
+        # 5m: a bearish gap 120..126 (bars 1-3), then a swing high at 123 (bar 6) reaching into it; entry 100, 1R 10
+        hs = [(130, 128, 129), (129, 126, 127), (127, 118, 119), (120, 110, 111), (112, 104, 105),
+              (118, 105, 117), (123, 116, 118), (119, 112, 113), (114, 108, 109), (110, 101, 102), (104, 99, 100)]
+        bars = [b(i, (h + l) / 2, h, l, c) for i, (h, l, c) in enumerate(hs)]
+        t = T0 + len(bars) * bar.FIVE
+        self.assertEqual(bar.sig_level(True, 100, 10, 140, bars, [], t), 123)
+        plain = [b(i, (h + l) / 2, h, l, c) for i, (h, l, c) in enumerate(hs[3:])]     # no gap above it
+        self.assertIsNone(bar.sig_level(True, 100, 10, 140, plain, [], t))
 
     def test_accumulation(self):
         bars = day_bars(self.LONG)

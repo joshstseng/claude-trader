@@ -31,7 +31,11 @@
                latest 1m candle's body low (high, short), only tightening; a hard close at window.hard_flat)
                optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R;
                exit.breakeven_level "5m"/"15m" (the user's way): instead once price takes the first internal
-               high/low between entry and target (at least breakeven_level_min_r out); +1R if there's none
+               high/low between entry and target (at least breakeven_level_min_r out); +1R if there's none;
+               exit.breakeven_sig5m: also a 5m internal high whose wick sat in a bearish 5m+ FVG (long)
+               exit.trail_gaps (item 8): after a pullback into a new 5m gap (1m gaps once +trail_1m_after_r was
+               reached), when price breaks the internal high made before it, the stop goes to the pullback's low
+               (2 ticks under), only ever up; a pullback that tests no gap moves nothing
 
 Definitions (each counts only once it's confirmed, so a backtest never peeks):
     swing        a fractal: a high (low) above (below) the 2 bars on each side; confirmed when the 2nd bar after closes
@@ -392,6 +396,38 @@ def internal_level(long: bool, entry: float, risk: float, target: float, bars: l
     return best
 
 
+def sig_level(long: bool, entry: float, risk: float, target: float, b5: list[Bar], b15: list[Bar], t: datetime,
+              min_r: float = 0.5) -> float | None:
+    """exit.breakeven_sig5m (2026-11-20): the nearest 5m internal high (long; low for a short) between entry and
+    target, untaken, at least min_r out, whose wick sat inside an opposing 5m or 15m FVG (bearish, for a long)
+    that was still open when the swing formed. Breaking it -> break-even."""
+    sign = 1 if long else -1
+    d5 = [b for b in b5 if b.start + FIVE <= t]
+    highs, lows = swings(d5, FIVE)
+    gaps = [(g, bars) for bars, span in ((d5, FIVE), ([b for b in b15 if b.start + FIFTEEN <= t], FIFTEEN))
+            for g in fvgs(bars, span) if (g["kind"] == "bear") == long]
+    best = None
+    for p in (highs if long else lows):
+        if p[2] > t:
+            continue
+        r = (p[0] - entry) * sign / risk
+        if r < min_r or (p[0] - target) * sign >= 0:
+            continue
+        if any((x.h > p[0]) if long else (x.l < p[0]) for x in d5[p[3] + 1:]):
+            continue
+        inside = False
+        for g, bars in gaps:
+            if g["known"] > p[1] or not (g["lo"] <= p[0] <= g["hi"]):
+                continue
+            k0 = bisect_left([b.start for b in bars], g["known"])
+            if not any(((x.c > g["hi"]) if long else (x.c < g["lo"])) for x in bars[k0:] if x.start < p[1]):
+                inside = True                     # still open when the swing's wick reached into it
+                break
+        if inside and (best is None or abs(p[0] - entry) < abs(best - entry)):
+            best = p[0]
+    return best
+
+
 def find_target(long: bool, entry: float, risk: float, b5: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
     """The most recent 5m lower high (long) / higher low (short) 2–3R away, else 2R (runs #27–#30)."""
     tg = s["target"]
@@ -586,8 +622,22 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
         be_lvl = internal_level(long, tr.entry, risk, target, b5 if ex["breakeven_level"] == "5m" else b15,
                                 FIVE if ex["breakeven_level"] == "5m" else FIFTEEN, fb.start,
                                 ex.get("breakeven_level_min_r", 0.5))
-        if be_lvl is not None:                    # found: it replaces +be_r (none: +be_r stays as the fallback)
-            be_r = None
+    if ex.get("breakeven_sig5m"):                 # also: a 5m internal high whose wick sat in a bearish 5m+ FVG (long)
+        sig = sig_level(long, tr.entry, risk, target, b5, b15, fb.start, ex.get("breakeven_level_min_r", 0.5))
+        if sig is not None and (be_lvl is None or abs(sig - tr.entry) < abs(be_lvl - tr.entry)):
+            be_lvl = sig
+    if be_lvl is not None:                        # found: it replaces +be_r (none: +be_r stays as the fallback)
+        be_r = None
+    sign = 1 if long else -1
+    better = lambda lvl: (lvl > cur) if long else (lvl < cur)                    # noqa: E731
+    tg = ex.get("trail_gaps")                     # item 8: trail to pullback lows after pullbacks into new gaps
+    if tg:
+        after = fb.start + ONE
+        g5 = [dict(g, alive=True) for g in fvgs(b5, FIVE) if g["known"] > after and (g["kind"] == "bull") == long]
+        g1 = [dict(g, known=bars1[g["j"]].start + ONE, alive=True)
+              for g in fvgs(bars1, ONE) if g["j"] > fill_i and (g["kind"] == "bull") == long]
+        tbuf = s["stop"]["buffer_ticks"] * c["tick"]
+        mfe, pre, pull = 0.0, tr.entry, None
     cur, why = stop, "stop"                       # the stop moves to entry once +be_r is reached (exit.breakeven_at_r)
     for j in range(fill_i, len(bars1)):
         b = bars1[j]
@@ -608,9 +658,30 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
             if (lvl > cur) if long else (lvl < cur):
                 cur, why = lvl, "trail_stop"
             continue
-        if be_lvl is not None and why == "stop" and ((b.h > be_lvl) if long else (b.l < be_lvl)):
+        if tg:                                    # at this minute's close
+            now = b.start + ONE
+            ext = (b.h - tr.entry) if long else (tr.entry - b.l)
+            for g in g5 + g1:                     # a close through a gap kills it
+                if g["alive"] and g["known"] <= now and ((b.c < g["lo"]) if long else (b.c > g["hi"])):
+                    g["alive"] = False
+            pool = g1 if mfe >= ex.get("trail_1m_after_r", 2.0) * risk else g5    # beyond 2R: 1m gaps
+            mfe = max(mfe, ext)
+            if pull is None:
+                if any(g["alive"] and g["known"] <= b.start and ((b.l <= g["hi"]) if long else (b.h >= g["lo"]))
+                       for g in pool):
+                    pull = b.l if long else b.h                       # a pullback into a gap
+                else:
+                    pre = max(pre, b.h) if long else min(pre, b.l)    # the internal high so far
+            elif (b.h > pre) if long else (b.l < pre):                # broke the internal high: trail
+                lvl = pull - tbuf if long else pull + tbuf
+                if better(lvl):
+                    cur, why = lvl, "trail_stop"
+                pull, pre = None, (b.h if long else b.l)
+            else:
+                pull = min(pull, b.l) if long else max(pull, b.h)
+        if be_lvl is not None and better(tr.entry) and ((b.h > be_lvl) if long else (b.l < be_lvl)):
             cur, why = tr.entry, "be_stop"        # took the internal level -> stop to entry
-        if be_r is not None and why == "stop":    # at this minute's close: +1R reached -> stop to entry
+        if be_r is not None and better(tr.entry):  # at this minute's close: +be_r reached -> stop to entry
             best = (b.h - tr.entry) if long else (tr.entry - b.l)
             if best >= be_r * risk:
                 cur, why = tr.entry, "be_stop"
