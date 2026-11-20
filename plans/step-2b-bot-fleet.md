@@ -130,6 +130,8 @@ v1 only watches and relays. Where it grows, in order:
 
 **Done when:** bot #2 has run a clean week of alerts next to the ORB bot.
 
+**Candidate (2026-11-20):** Mr. S, an NQ futures mean-reversion bot for the Asia session ([mrs-strategy.md](mrs-strategy.md)); strategy built, backtests next. It needs a futures broker (Tradovate, not Alpaca) and Uri's per-bot hours ([head-session-hours.md](head-session-hours.md)).
+
 ---
 
 ## Order and timing

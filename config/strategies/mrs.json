@@ -1,0 +1,55 @@
+{
+  "id": "mrs",
+  "name": "Mr. S (NQ mean reversion)",
+  "enabled": false,
+  "note": "Not a live bot yet: strategy + indicators only (plans/mrs-strategy.md). Backtest scenarios next; Tradovate later.",
+  "symbol": "MNQ",
+  "data_symbol": "NQ=F",
+  "variant": "trend_pullback",
+  "session": {
+    "name": "Asia",
+    "tz": "America/Los_Angeles",
+    "start": "16:00",
+    "end": "22:00",
+    "last_entry": "21:45"
+  },
+  "indicators": {
+    "bb_length": 20,
+    "bb_std": 2.0,
+    "rsi_length": 14,
+    "adx_length": 14,
+    "trend_minutes": 15
+  },
+  "filters": {
+    "rsi_long_above": 55,
+    "rsi_short_below": 45,
+    "adx_min": 20
+  },
+  "entry": {
+    "cross": "5m close outside the band",
+    "back_inside": "any part of the body inside the band",
+    "max_wait_bars": 2,
+    "stop_buffer_ticks": 2,
+    "min_stop_points": 5
+  },
+  "exit": {
+    "target_r": 2.0,
+    "middle_band": true,
+    "min_reward_r": 1.0
+  },
+  "account": {
+    "size_usd": 50000,
+    "risk_pct": 0.01,
+    "max_session_loss_r": 2,
+    "max_contracts": 20
+  },
+  "contract": {
+    "tick": 0.25,
+    "point_value": 2.0
+  },
+  "costs": {
+    "commission_per_side": 0.75,
+    "slippage_ticks": 1,
+    "note": "assumed: MNQ commission + exchange fees per contract per side, 1 tick slippage on market fills (entry, stop, session end); check against Tradovate's real rates later"
+  }
+}
