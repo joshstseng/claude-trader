@@ -24,7 +24,7 @@ A separate Discord application ("Uri"), added to the server with **bot** + **app
 4. Optional: **Settings** → rename the service to `head-bot`
 5. It deploys on its own. `#system` shows **🧭 Uri (head bot) online · watching: Orbi** (messages use each bot's Discord name)
 
-**Deploys:** the head has no volume, so Railway starts the new copy before stopping the old one: you see "online" first, then a small grey "🔄 the previous copy shut down" line (not a 🔴 stopped). A real stop still shows 🔴
+**Deploys:** the head has no volume, so Railway starts the new copy before stopping the old one: you see "online" first, then a small grey "🔄 Uri rebooted with the new deploy" line (not a 🔴 stopped). A real stop still shows 🔴
 
 ## What it does
 | | |

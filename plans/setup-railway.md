@@ -37,7 +37,7 @@ About 10 minutes. After this the bot runs in the cloud, so your Mac can be off.
    ```
    Times in Railway's logs are UTC (5 hours ahead of New York, 8 ahead of you).
 2. Discord `#system` should show **🟢 ORB bot online**.
-3. Try `/status` in Discord.
+3. Try `/today` in Discord (`/status Orbi` once the head bot is set up).
 
 **Don't** generate a public domain (Settings → Networking). The bot doesn't need one.
 
@@ -50,7 +50,7 @@ About 10 minutes. After this the bot runs in the cloud, so your Mac can be off.
 | Deploy new code | `git push` to `main`. Railway rebuilds and restarts automatically. **Push outside 9:45–11:35 AM ET** (6:45–8:35 AM your time) so a restart doesn't land mid-scan. If one does, the bot resumes the day: no double alerts, the daily cap carries over |
 | Stop alerts but keep it running | `/pause` in Discord (`/resume` to turn back on) |
 | Stop the bot completely | Railway → service → Deployments → newest → **⋮** → **Remove**. `#system` shows 🔴 stopped. **Redeploy** to start again |
-| See what it did | Railway → View Logs, or `/status` and `/today` in Discord |
+| See what it did | Railway → View Logs, or `/status Orbi` (head bot) and `/today` in Discord |
 | Change a setting (e.g. target 1R) | Edit `config/strategies/orb.json` or `config/risk.json`, commit, push |
 | See every bot at once | `/status` (head bot); the daily summary in `#daily-summary` comes from the head, each bot's detail in its thread. The head is a second service in the same project ([setup-head-bot.md](setup-head-bot.md)); a push redeploys both |
 | Pause or close everything, every bot | `/pause-all` · `/resume-all` · `/flatten-all confirm:yes` (head bot). A bot's own `/pause` and `/flatten` still work, even with the head down |

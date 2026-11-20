@@ -605,7 +605,7 @@ async def _live(cfg: HeadSettings, trade_log: tradelog.TradeLog) -> None:
             log.info("Stopping")
             try:
                 replaced = await asyncio.to_thread(trade_log.fleet, "head_instance") not in (None, INSTANCE)
-                text = (f"-# 🔄 The previous copy of {bot_name(HEAD)} shut down: the new deploy has taken over."
+                text = (f"-# 🔄 {bot_name(HEAD)} rebooted with the new deploy"
                         if replaced else f"🔴 **{bot_name(HEAD)} (head bot) stopped.** The trading bots carry on; "
                         "no watchdog until it's back.")
                 await asyncio.wait_for(bot.post(cfg.channel_system, text), 10)

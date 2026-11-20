@@ -468,10 +468,7 @@ class TraderBot(discord.Client):
     def _add_commands(self) -> None:
         tree = self.tree
 
-        @tree.command(name="status", description="Is the ORB bot running? What's it doing today?")
-        @app_commands.check(lambda i: i.user.id == self.cfg.owner_id)
-        async def status(interaction: discord.Interaction):
-            await interaction.response.send_message(self.status_text(), ephemeral=True)
+        # /status lives on the head bot (`/status Orbi`): this bot hands it its status_text() every minute
 
         @tree.command(name="today", description="Today's ORB signals and what happened to each")
         @app_commands.check(lambda i: i.user.id == self.cfg.owner_id)
@@ -576,7 +573,9 @@ class TraderBot(discord.Client):
 
     def status_text(self) -> str:
         st = self.state
-        lines = [f"**ORB bot** {'⏸️ PAUSED (no alerts)' if st.paused else '🟢 running'} · paper · alerts only"]
+        orders_on = bool(self.desk is not None and (self.desk.o or {}).get("enabled"))
+        lines = [f"**ORB bot** {'⏸️ PAUSED (no alerts)' if st.paused else '🟢 running'} · paper · "
+                 + ("Approve places paper orders" if orders_on else "alerts only")]
         if st.started_at:
             lines.append(f"Online since {st.started_at.strftime('%a %-I:%M %p')} ET")
         if st.session is None:
