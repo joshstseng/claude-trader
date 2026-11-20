@@ -507,7 +507,7 @@ def cmd_backtest_nq(a) -> int:
 
 
 def cmd_backtest(a) -> int:
-    if a.strategy in ("mrs", "bar"):
+    if a.strategy in ("mrs", "bar", "snap"):
         return cmd_backtest_nq(a)
     from app.backtest import run as bt
     logs.setup()

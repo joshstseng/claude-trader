@@ -1,0 +1,30 @@
+{
+  "id": "snap",
+  "name": "Snap (index ETF dip-buyer)",
+  "enabled": false,
+  "note": "Backtest only (app/strategies/snap.py, app/backtest/snap.py). Found by the research lab 2026-11-20: passed the pre-set bar on its one look at 2024-2026 (run #70). Not wired to any live bot.",
+  "universe": ["QQQ", "SPY", "IWM", "DIA"],
+  "entry": {
+    "trend_sma": 200,
+    "rsi_period": 2,
+    "rsi_below": 10,
+    "ibs_below": 0.1
+  },
+  "exit": {
+    "above_sma": 5,
+    "max_days": 20
+  },
+  "stop": {
+    "atr_period": 14,
+    "atr_mult": 3.0
+  },
+  "account": {
+    "size_usd": 50000,
+    "risk_pct": 0.01,
+    "max_leverage": 2.0
+  },
+  "costs": {
+    "slippage_bp": 1.0,
+    "note": "no commission (Alpaca); 1 bp each way on market-on-close orders"
+  }
+}
