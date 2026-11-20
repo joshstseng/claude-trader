@@ -212,6 +212,16 @@ class UserRulesTest(unittest.TestCase):
         self.assertEqual(bar.run_day(bars, D, self.s, ath_before=20010).why, "near the all-time high: longs only")
         self.assertNotEqual(bar.run_day(bars, D, self.s, ath_before=30000).why, "near the all-time high: longs only")
 
+    def test_trend_inverse_takes_the_other_side(self):
+        from unittest import mock
+        bars = day_bars(self.LONG)                                           # a long breakout
+        for bias, normal_trades in (("bull", True), ("bear", False), (None, False)):
+            with mock.patch.object(bar, "bias_1h", return_value=(bias, "test")):
+                self.s["trend_filter"] = "1h"
+                self.assertEqual(bar.run_day(bars, D, self.s).trade is not None, normal_trades)
+                self.s["trend_filter"] = "1h_inverse"
+                self.assertEqual(bar.run_day(bars, D, self.s).trade is not None, bias == "bear")
+
     def test_accumulation(self):
         bars = day_bars(self.LONG)
         self.s["filters"]["accumulation_since"] = "03:30"

@@ -22,7 +22,8 @@
                breakout closes within that % of it (all-time = since the data starts, 2021)
                filters.accumulation_since "03:30": no trade if no 5m or 15m FVG has formed since then
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
-               last 1h break of structure; breakouts against it are skipped
+               last 1h break of structure; breakouts against it are skipped. "1h_inverse" (test, 2026-11-20):
+               the opposite, only breakouts against that bias are taken
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
                optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R
 
@@ -357,10 +358,14 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
     side = "long" if long else "short"
     placed = brk.start + FIVE
     bias = None
-    if s.get("trend_filter") == "1h":
+    tf = s.get("trend_filter")
+    if tf in ("1h", "1h_inverse"):
         bias, _ = bias_1h(h1, placed)
-        if bias != ("bull" if long else "bear"):
+        if tf == "1h" and bias != ("bull" if long else "bear"):
             out.why = f"against the 1h trend ({bias or 'none'})"
+            return out
+        if tf == "1h_inverse" and bias != ("bear" if long else "bull"):     # only breakouts AGAINST the bias
+            out.why = f"with the 1h trend ({bias or 'none'})"
             return out
     f = s.get("filters") or {}
     pct = f.get("ath_longs_only_pct")
