@@ -1,0 +1,52 @@
+# Brix: what we're adding from the user's discretion
+
+Rules taken from the user's own trading ([October journal](bar-journal/2026-10.md), [trades](bar-journal/2026-10-trades.csv)), ordered **easiest to hardest** to build. Each is tested **one at a time** against baseline run #35 over the full 6 years, then kept or dropped.
+
+October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9R on 17 with the trend filter off).
+
+## Easy
+
+- [ ] **1. Enter at the body midpoint.** The limit order goes at the midpoint of the 8:00 ET 15m candle's **body** (open to close), not the whole candle. If the body is small, use the whole candle, wicks included (10/7).
+  - Brix missed fills on 10/9, 10/12 and 10/28, all wins for the user.
+  - *To decide:* what counts as "small" (e.g. a body under X points, or under half the candle's range).
+
+- [ ] **2. Cancel the order if the target is reached first.** If price reaches the target level before the limit fills, the move has happened without us, so cancel.
+  - Days: 10/1, 10/13, 10/14, 10/16; 10/23 was the user's "bad trade, should have gotten out".
+
+- [ ] **3. The user's target rule.**
+  - Target the nearest internal high or low (or an unfilled 1h FVG) if it's at least 2R away.
+  - If the next level is beyond 3R, use a flat 3R.
+  - If the stop is large in points, use 2R.
+  - Today Brix uses a flat 2R; the user's wins averaged 2.3R.
+  - *To decide:* what counts as a "large" stop.
+
+- [ ] **4. Longs only near an all-time high.** When the 8:00 candle sits near the all-time high, take no shorts (10/2, 10/6).
+  - *To decide:* how near counts (e.g. within 0.5%).
+
+- [ ] **5. No trade in accumulation.** No trade if no 5m or 15m FVG has formed since 3:30 AM PT (10/21).
+
+## Medium
+
+- [ ] **6. A new 1h trend filter, read the way the user reads it.** The current filter disagreed with the user on 10 of the 12 days it blocked, including 6 of their wins (+15.2R).
+  - The user's definition (10/7, bearish): *"the market is dumping. We are disrespecting all bullish gaps and creating 1h bearish gaps. We are cleanly distributing down with almost no retraces."*
+  - As a rule, bearish when, over the recent 1h candles:
+    - new **bearish 1h FVGs are forming**,
+    - **bullish 1h FVGs are being closed through** (disrespected), and
+    - retraces are small.
+  - Bullish is the mirror image. Mixed signals mean no clear trend, so no trade (or no filter, to test both).
+  - *To decide:* how far back "recent" goes (e.g. the last 24 1h candles, or since the previous day's 8:00), and what counts as a small retrace.
+
+- [ ] **7. Break-even at the first internal level, instead of at a fixed 1R.** Move the stop to break-even once price takes out the first internal low (high for a long) after entry (10/12, 10/20, 10/22, 10/28).
+  - The user also moves to break-even when a lower-timeframe gap is disrespected (10/26). That's a later refinement.
+
+- [ ] **8. Trail the stop in profit.** After a new internal low forms (high for a long), trail the stop to the newest higher-timeframe FVG: 5m, then 3m, then 1m (10/22, 10/26, 10/27).
+
+## Hard
+
+- [ ] **9. The "stronger" stop level.** Put the stop behind the level that has already been tested or respected: a 15m high that rejected price, an order block's body, the low an earlier candle bounced from (10/12, 10/13, 10/29).
+  - The user's stops ran about 35 points (median) against Brix's 75.
+  - *To decide:* a testable definition of "stronger".
+
+## Notes
+- Data caveat: Brix tests on the Nasdaq-100 cash index (HistData), while the user trades MNQ. Prices differ by the basis, and a midpoint fill can differ by a few points.
+- October is one month and suited the setup. The 6-year test decides.

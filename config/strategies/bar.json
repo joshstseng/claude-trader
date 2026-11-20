@@ -12,7 +12,16 @@
     "order_until": "08:00",
     "flat": "09:00"
   },
+  "entry": {
+    "midpoint": "candle",
+    "small_body_atr": 0.5,
+    "cancel_if_target_first": false
+  },
   "trend_filter": "1h",
+  "filters": {
+    "ath_longs_only_pct": null,
+    "accumulation_since": null
+  },
   "stop": {
     "swing_tf": "1h",
     "max_stop_atr": 3.0,
@@ -23,7 +32,9 @@
     "mode": "flat",
     "level_min_r": 2.0,
     "level_max_r": 4.0,
-    "default_r": 2.0
+    "default_r": 2.0,
+    "flat_beyond_r": 3.0,
+    "big_stop_atr": 2.0
   },
   "exit": {
     "breakeven_at_r": 1.0

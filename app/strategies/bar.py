@@ -13,6 +13,14 @@
                far side (its low for a long); 2 ticks beyond the level
     target     (target.mode "1h") the nearer of the most recent 1h swing high ≥ 2R away and an unfilled 1h FVG,
                each within 4R; otherwise 2R. ("5m": the most recent 5m lower high 2–3R away, runs #27–#30)
+    options    (each off by default; added 2026-11-20 from the user's own trading, plans/bar-checklist.md 1–5)
+               entry.midpoint "body": the body's midpoint, unless the body is < small_body_atr × the 15m ATR
+               entry.cancel_if_target_first: cancel the order if price reaches the target before it fills
+               target.mode "levels": nearest untaken 15m/1h swing or unfilled 1h FVG ≥ level_min_r, if within
+               flat_beyond_r, else flat_beyond_r; a stop > big_stop_atr × the 15m ATR gets default_r
+               filters.ath_longs_only_pct: no shorts when the latest 1h swing high is the all-time high or the
+               breakout closes within that % of it (all-time = since the data starts, 2021)
+               filters.accumulation_since "03:30": no trade if no 5m or 15m FVG has formed since then
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
                last 1h break of structure; breakouts against it are skipped
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
@@ -209,6 +217,43 @@ def find_target_1h(long: bool, entry: float, risk: float, h1: list[Bar], t: date
     return entry + sign * tg["default_r"] * risk, f"{tg['default_r']:g}R"
 
 
+def find_target_levels(long: bool, entry: float, risk: float, b15: list[Bar], h1: list[Bar], t: datetime,
+                       s: dict) -> tuple[float, str]:
+    """target.mode "levels" (the user's rule, 2026-11-20): a big stop (> big_stop_atr × the 15m ATR) -> default_r;
+    otherwise the nearest untaken 15m/1h swing high (low, for a short) or unfilled 1h FVG at least level_min_r
+    away, if it's within flat_beyond_r; otherwise a flat flat_beyond_r."""
+    tg = s["target"]
+    sign = 1 if long else -1
+    a = atr(b15, FIFTEEN, t)
+    if a is not None and risk > tg["big_stop_atr"] * a:
+        return entry + sign * tg["default_r"] * risk, f"{tg['default_r']:g}R (big stop)"
+    cands = []
+    for bars, span, name in ((b15, FIFTEEN, "15m"), (h1, HOUR, "1h")):
+        done = [b for b in bars if b.start + span <= t]
+        highs, lows = swings(done, span)
+        for p in (highs if long else lows):
+            if p[2] > t:
+                continue
+            if any((x.h > p[0]) if long else (x.l < p[0]) for x in done[p[3] + 1:]):
+                continue                                                       # already taken
+            cands.append((p[0], f"{name} swing " + ("high" if long else "low")))
+    done = [b for b in h1 if b.start + HOUR <= t]
+    for g in fvgs(done, HOUR):
+        near, far = (g["lo"], g["hi"]) if long else (g["hi"], g["lo"])
+        if (near - entry) * sign <= 0:
+            continue
+        if any((x.h >= far) if long else (x.l <= far) for x in done[g["j"] + 1:]):
+            continue
+        cands.append((near, "1h FVG"))
+    rs = [(c[0], c[1], (c[0] - entry) * sign / risk) for c in cands]
+    rs = [c for c in rs if c[2] >= tg["level_min_r"]]
+    if rs:
+        price, src, r = min(rs, key=lambda c: c[2])
+        if r <= tg["flat_beyond_r"]:
+            return price, f"{src} ({r:.1f}R)"
+    return entry + sign * tg["flat_beyond_r"] * risk, f"{tg['flat_beyond_r']:g}R"
+
+
 def find_target(long: bool, entry: float, risk: float, b5: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
     """The most recent 5m lower high (long) / higher low (short) 2–3R away, else 2R (runs #27–#30)."""
     tg = s["target"]
@@ -266,6 +311,15 @@ class Day8:
         return [self.trade] if self.trade else []
 
 
+def entry_mid(ref: Bar, atr15: float | None, s: dict) -> float:
+    """The limit price before rounding: the whole candle's midpoint, or (entry.midpoint "body") the body's,
+    unless the body is small (< entry.small_body_atr × the 15m ATR), then the whole candle's."""
+    e = s.get("entry") or {}
+    if e.get("midpoint") == "body" and atr15 is not None and abs(ref.c - ref.o) >= e.get("small_body_atr", 0.5) * atr15:
+        return (ref.o + ref.c) / 2
+    return (ref.h + ref.l) / 2
+
+
 def _at(day: date, hhmm: str) -> datetime:
     return datetime.combine(day, dtime.fromisoformat(hhmm), tzinfo=PT)
 
@@ -275,8 +329,9 @@ def _tick(x: float, tick: float, down: bool) -> float:
     return round((math.floor(q + 1e-9) if down else math.ceil(q - 1e-9)) * tick, 10)
 
 
-def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
-    """bars1: 1m bars from a few days before (for 15m/1h structure) through the session."""
+def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = None) -> Day8:
+    """bars1: 1m bars from a few days before (for 15m/1h structure) through the session.
+    ath_before: the highest high of all data before bars1 (for filters.ath_longs_only_pct)."""
     out = Day8(day.isoformat())
     w = s["window"]
     ref_t, look_t, expire_t, flat_t = (_at(day, w[k]) for k in ("reference", "breakouts_from", "order_until", "flat"))
@@ -288,7 +343,8 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
     if ref is None:
         out.why = "no 8:00 ET candle (market closed?)"
         return out
-    mid = (ref.h + ref.l) / 2
+    e = s.get("entry") or {}
+    mid = entry_mid(ref, atr(b15, FIFTEEN, ref_t + FIFTEEN), s)
     c = s["contract"]
 
     # ---- the breakout
@@ -305,6 +361,23 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
         bias, _ = bias_1h(h1, placed)
         if bias != ("bull" if long else "bear"):
             out.why = f"against the 1h trend ({bias or 'none'})"
+            return out
+    f = s.get("filters") or {}
+    pct = f.get("ath_longs_only_pct")
+    if pct is not None and not long:             # near the all-time high: longs only
+        ath = max([ath_before if ath_before is not None else -math.inf]
+                  + [b.h for b in bars1 if b.start + ONE <= placed])
+        highs, _ = swings([b for b in h1 if b.start + HOUR <= placed], HOUR)
+        highs = [p for p in highs if p[2] <= placed]
+        if (highs and highs[-1][0] >= ath) or brk.c >= ath * (1 - pct / 100):
+            out.why = "near the all-time high: longs only"
+            return out
+    since = f.get("accumulation_since")
+    if since:                                    # accumulation: no 5m or 15m FVG formed since `since`
+        t0 = _at(day, since)
+        if not any(bars[g["j"]].start >= t0 and g["known"] <= placed
+                   for bars, span in ((b5, FIVE), (b15, FIFTEEN)) for g in fvgs(bars, span)):
+            out.why = "accumulation (no 5m/15m FVG since " + since + ")"
             return out
 
     # ---- stop and target (known when the order goes in)
@@ -325,6 +398,8 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
         target, tsrc = entry + (1 if long else -1) * s["target"]["default_r"] * risk, f"{s['target']['default_r']:g}R"
     elif mode == "1h":
         target, tsrc = find_target_1h(long, entry, risk, h1, placed, s)
+    elif mode == "levels":
+        target, tsrc = find_target_levels(long, entry, risk, b15, h1, placed, s)
     else:
         target, tsrc = find_target(long, entry, risk, b5, placed, s)
     target = round(target, 2)
@@ -336,6 +411,9 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
         b = bars1[j]
         if b.start >= expire_t:
             break
+        if e.get("cancel_if_target_first") and ((b.h >= target) if long else (b.l <= target)):
+            out.why = "target reached before the fill"   # the move happened without us (same minute: cancel)
+            return out
         if (b.l <= entry - c["tick"]) if long else (b.h >= entry + c["tick"]):
             fill_i = j
             break

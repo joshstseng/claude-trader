@@ -156,5 +156,69 @@ class TargetTest(unittest.TestCase):
         self.assertEqual((price, src[:13]), (130, "1h swing high"))
 
 
+class UserRulesTest(unittest.TestCase):
+    """plans/bar-checklist.md 1–5 (2026-11-20): each off by default."""
+    LONG = {"04:00": (19970, 19972), "04:05": (19971, 19990), "04:10": (19989, 19998),
+            "05:00": (19995, 19996), "05:05": (19995, 20004), "05:10": (19999, 20005),
+            "06:00": (20004, 20015), "06:05": (20012, 20012), "06:10": (19999, 20003),
+            "06:15": (20002, 20030), "06:20": (20029, 20060), "06:25": (20059, 20080)}
+
+    def setUp(self):
+        self.s = copy.deepcopy(S)
+        self.s.update(trend_filter="none")
+        self.s["window"]["breakouts_from"] = "06:00"
+        self.s["stop"].update(swing_tf="15m", max_stop_atr=100)
+        self.s["exit"] = {"breakeven_at_r": None}
+
+    def test_defaults_are_off(self):
+        self.assertEqual(S["entry"], {"midpoint": "candle", "small_body_atr": 0.5, "cancel_if_target_first": False})
+        self.assertEqual(S["filters"], {"ath_longs_only_pct": None, "accumulation_since": None})
+        self.assertEqual(S["target"]["mode"], "flat")
+
+    def test_body_midpoint_unless_small(self):
+        ref = Bar(T0, 100, 130, 90, 110)                         # candle mid 110, body mid 105, body 10
+        s = copy.deepcopy(self.s)
+        self.assertEqual(bar.entry_mid(ref, 10, s), 110)
+        s["entry"]["midpoint"] = "body"
+        self.assertEqual(bar.entry_mid(ref, 10, s), 105)         # body 10 >= 0.5 × ATR 10
+        self.assertEqual(bar.entry_mid(ref, 30, s), 110)         # body 10 < 15: small, the whole candle
+        self.assertEqual(bar.entry_mid(ref, None, s), 110)
+
+    def test_cancel_if_target_reached_first(self):
+        bars = day_bars({**self.LONG, "06:05": (20012, 20100), "06:10": (19999, 20003), "06:15": (20002, 20003)})
+        self.assertIsNotNone(bar.run_day(bars, D, self.s).trade)
+        self.s["entry"]["cancel_if_target_first"] = True
+        self.assertEqual(bar.run_day(bars, D, self.s).why, "target reached before the fill")
+        self.assertIsNotNone(bar.run_day(day_bars(self.LONG), D, self.s).trade)   # target after the fill: kept
+
+    def test_target_levels(self):
+        h = lambda i, o, hi, lo, c: Bar(T0 + i * bar.HOUR, o, hi, lo, c)           # noqa: E731
+        h1 = [h(0, 100, 105, 99, 104), h(1, 104, 110, 103, 109), h(2, 109, 130, 108, 125),
+              h(3, 125, 126, 118, 119), h(4, 119, 121, 118, 120), h(5, 120, 120, 105, 106),
+              h(6, 106, 112, 100, 101), h(7, 101, 103, 99, 100), h(8, 100, 102, 98, 99)]
+        t = T0 + 9 * bar.HOUR
+        s = copy.deepcopy(S)
+        self.assertEqual(bar.find_target_levels(True, 100, 5, [], h1, t, s), (112, "1h FVG (2.4R)"))
+        self.assertEqual(bar.find_target_levels(True, 100, 8, [], h1, t, s), (124, "3R"))   # 1.5R / 3.75R: flat 3R
+        quiet = [Bar(t - (20 - i) * bar.FIFTEEN, 100, 100.5, 99.5, 100) for i in range(20)]  # 15m ATR 1
+        self.assertEqual(bar.find_target_levels(True, 100, 5, quiet, h1, t, s), (110, "2R (big stop)"))
+
+    def test_ath_longs_only(self):
+        short = {"05:00": (19995, 19996), "05:05": (19995, 20004), "05:10": (19999, 20005),
+                 "06:00": (19980, 19985), "06:05": (19984, 19986)}
+        bars = day_bars(short)
+        self.assertNotEqual(bar.run_day(bars, D, self.s, ath_before=20010).why, "near the all-time high: longs only")
+        self.s["filters"]["ath_longs_only_pct"] = 0.5
+        self.assertEqual(bar.run_day(bars, D, self.s, ath_before=20010).why, "near the all-time high: longs only")
+        self.assertNotEqual(bar.run_day(bars, D, self.s, ath_before=30000).why, "near the all-time high: longs only")
+
+    def test_accumulation(self):
+        bars = day_bars(self.LONG)
+        self.s["filters"]["accumulation_since"] = "03:30"
+        self.assertIsNotNone(bar.run_day(bars, D, self.s).trade)              # gaps formed this morning
+        self.s["filters"]["accumulation_since"] = "06:30"                     # none since (by 6:05): skipped
+        self.assertTrue(bar.run_day(bars, D, self.s).why.startswith("accumulation"))
+
+
 if __name__ == "__main__":
     unittest.main()

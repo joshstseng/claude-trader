@@ -14,6 +14,7 @@ import json
 import os
 from bisect import bisect_left
 from collections import Counter
+from itertools import accumulate
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -28,14 +29,16 @@ HISTORY = timedelta(days=5)          # 15m and 1h structure before each morning
 
 def run_days(bars1, start: date, end: date, s: dict) -> list[bar.Day8]:
     times = [b.start for b in bars1]
+    peak = list(accumulate((b.h for b in bars1), max))      # the all-time high so far (from the data's start)
     out, day = [], start
     while day <= end:
         if day.weekday() < 5:
             lo = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) - HISTORY
             hi = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) + timedelta(hours=10)
-            chunk = bars1[bisect_left(times, lo):bisect_left(times, hi)]
+            k = bisect_left(times, lo)
+            chunk = bars1[k:bisect_left(times, hi)]
             if any(b.start.astimezone(bar.PT).date() == day for b in chunk):
-                out.append(bar.run_day(chunk, day, s))
+                out.append(bar.run_day(chunk, day, s, ath_before=peak[k - 1] if k else None))
         day += timedelta(days=1)
     return out
 
