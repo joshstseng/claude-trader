@@ -5,6 +5,7 @@
   "note": "Not a live bot yet: strategy + indicators only (plans/mrs-strategy.md). Backtest scenarios next; Tradovate later.",
   "symbol": "MNQ",
   "data_symbol": "NQ=F",
+  "data_source": "yahoo",
   "variant": "trend_pullback",
   "session": {
     "name": "Asia",

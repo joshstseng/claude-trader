@@ -2,6 +2,7 @@
 
     python -m app backtest --strategy mrs --from 2026-09-14 --to 2026-11-20 --label baseline
     python -m app backtest --strategy mrs --from … --to … --set filters.adx_min=25 --label "ADX 25"
+    python -m app backtest --strategy mrs --from 2021-11-01 --to … --set data_source=dukascopy --label …
 
 Data: Yahoo's NQ=F (front month) 5m bars. Yahoo only serves the last ~60 days, so every run adds what it
 fetches to a cache (data/bars/futures/), and history grows with each run. Older years: import later
@@ -169,13 +170,23 @@ def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_pat
         reports: Path = REPORTS, fetch: bool = True, bars: list[mrs.Bar] | None = None, progress=print) -> MrsRun:
     base = json.loads((paths.STRATEGY_CONFIG_DIR / "mrs.json").read_text())
     s, _, _ = apply_overrides(base, {}, list(overrides))
-    bars = bars if bars is not None else bars_for(s["data_symbol"], fetch=fetch, progress=progress)
+    source = s.get("data_source", "yahoo")
+    if bars is None and source == "dukascopy":
+        from app.backtest import dukascopy
+        bars = dukascopy.bars_5m(start - WARMUP - timedelta(days=1), end + timedelta(days=1), fetch=fetch,
+                                 progress=progress)
+    elif bars is None:
+        bars = bars_for(s["data_symbol"], fetch=fetch, progress=progress)
     if not bars:
-        raise RuntimeError(f"No {s['data_symbol']} bars (Yahoo unreachable and nothing cached).")
+        raise RuntimeError(f"No bars for {start} → {end} ({source}).")
     first = bars[0].start.astimezone(mrs.PT).date()
     sessions = run_sessions(bars, max(start, first), end, s)
     m = headline(sessions, s)
-    snapshot = {"strategy": s, "overrides": list(overrides), "data": DATA_NOTE,
+    if source == "dukascopy":
+        from app.backtest.dukascopy import NOTE as note
+    else:
+        note = DATA_NOTE
+    snapshot = {"strategy": s, "overrides": list(overrides), "data": note,
                 "bars": [bars[0].start.isoformat(), bars[-1].start.isoformat(), len(bars)]}
     log_db = tradelog.TradeLog(db_path)
     try:

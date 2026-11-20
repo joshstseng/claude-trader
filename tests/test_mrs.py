@@ -250,5 +250,51 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual([b.c for b in merged], [1.0])
 
 
+class DukascopyTest(unittest.TestCase):
+    @staticmethod
+    def bi5(rows):
+        import lzma
+        import struct
+        raw = b"".join(struct.pack(">5if", *r) for r in rows)
+        return lzma.compress(raw, format=lzma.FORMAT_ALONE)
+
+    def test_parse_and_5m_bars(self):
+        from app.backtest import dukascopy as dk
+        day = date(2025, 6, 10)
+        raw = self.bi5([(0, 21805719, 21799965, 21795487, 21806475, 0.01),     # open, close, low, high
+                        (60, 21800000, 21810000, 21799000, 21812000, 0.01),
+                        (120, 1, 1, 1, 1, 0.0),                                 # flat, no volume: dropped
+                        (300, 21810000, 21805000, 21804000, 21811000, 0.01)])
+        rows = dk.parse(raw, day)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0][1:], [21805.719, 21806.475, 21795.487, 21799.965])   # o, h, l, c
+        bars = dk.to_5m(rows)
+        self.assertEqual(len(bars), 2)
+        self.assertEqual((bars[0].o, bars[0].h, bars[0].l, bars[0].c), (21805.719, 21812.0, 21795.487, 21810.0))
+        self.assertEqual(bars[1].start.strftime("%H:%M"), "00:05")
+
+    def test_download_retries_caches_and_resumes(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from urllib.error import HTTPError
+        from app.backtest import dukascopy as dk
+        calls = []
+
+        def opener(url):
+            calls.append(url)
+            if len(calls) == 1:
+                raise HTTPError(url, 503, "busy", None, None)
+            return self.bi5([(0, 1000, 2000, 500, 2500, 1.0)])
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(dk, "CACHE", Path(d)), \
+                mock.patch.object(dk.time, "sleep"):
+            n = dk.download(date(2025, 6, 6), date(2025, 6, 8), pause_s=0, progress=lambda m: None, opener=opener)
+            self.assertEqual(n, 2)                                   # Fri + Sun; Saturday skipped
+            self.assertIn("/2025/05/06/", calls[0])                  # the month is 0-based in the URL
+            self.assertEqual(len(calls), 3)                          # one 503, retried
+            self.assertEqual(dk.download(date(2025, 6, 6), date(2025, 6, 8), pause_s=0, opener=opener), 0)
+            self.assertEqual(len(dk.load_1m(date(2025, 6, 6), date(2025, 6, 8))), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
