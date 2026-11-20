@@ -27,7 +27,7 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
 
 ## Medium
 
-- [ ] **6. A new 1h trend filter, read the way the user reads it.** The current filter disagreed with the user on 10 of the 12 days it blocked, including 6 of their wins (+15.2R).
+- [x] **6. A new 1h trend filter, read the way the user reads it.** *First version built (`trend_filter="mtf"`: 4h/1h/15m, gaps decide, BOS/CISD confirm, 2 big candles, 2 of 3 agree). Run #44 alone: −0.034R a trade; #45 with 1–5: +0.003R. October: agrees with the user 9 days, contradicts 1, unclear 11.* The current filter disagreed with the user on 10 of the 12 days it blocked, including 6 of their wins (+15.2R).
   - The user's definition (10/7, bearish): *"the market is dumping. We are disrespecting all bullish gaps and creating 1h bearish gaps. We are cleanly distributing down with almost no retraces."*
   - As a rule, bearish when, over the recent 1h candles:
     - new **bearish 1h FVGs are forming**,
@@ -48,5 +48,6 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
   - *To decide:* a testable definition of "stronger".
 
 ## Notes
+- **Later idea (from the user):** when 2 timeframes agree and the third doesn't, we expect it to flip; look for a level that could flip it (a 15m FVG, the 8:00 candle).
 - Data caveat: Brix tests on the Nasdaq-100 cash index (HistData), while the user trades MNQ. Prices differ by the basis, and a midpoint fill can differ by a few points.
 - October is one month and suited the setup. The 6-year test decides.

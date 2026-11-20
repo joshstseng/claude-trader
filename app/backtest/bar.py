@@ -25,11 +25,17 @@ from app.backtest.run import DB, REPORTS, apply_overrides
 from app.strategies import bar
 
 HISTORY = timedelta(days=5)          # 15m and 1h structure before each morning
+TREND_HISTORY = timedelta(days=31)   # trend_filter "mtf": 4h candles over the last month
 
 
 def run_days(bars1, start: date, end: date, s: dict) -> list[bar.Day8]:
     times = [b.start for b in bars1]
     peak = list(accumulate((b.h for b in bars1), max))      # the all-time high so far (from the data's start)
+    mtf = s.get("trend_filter") == "mtf"
+    if mtf:                                                  # 5m bars once, sliced per day (the 4h needs ~30 days)
+        from app.backtest.dukascopy import to_5m
+        b5 = to_5m([[int(b.start.timestamp()), b.o, b.h, b.l, b.c] for b in bars1])
+        times5 = [b.start for b in b5]
     out, day = [], start
     while day <= end:
         if day.weekday() < 5:
@@ -38,7 +44,10 @@ def run_days(bars1, start: date, end: date, s: dict) -> list[bar.Day8]:
             k = bisect_left(times, lo)
             chunk = bars1[k:bisect_left(times, hi)]
             if any(b.start.astimezone(bar.PT).date() == day for b in chunk):
-                out.append(bar.run_day(chunk, day, s, ath_before=peak[k - 1] if k else None))
+                tb = None
+                if mtf:
+                    tb = b5[bisect_left(times5, lo - TREND_HISTORY + HISTORY):bisect_left(times5, hi)]
+                out.append(bar.run_day(chunk, day, s, ath_before=peak[k - 1] if k else None, trend_b5=tb))
         day += timedelta(days=1)
     return out
 
@@ -81,7 +90,7 @@ def run(start: date, end: date, *, label: str, overrides=(), db_path: Path = DB,
     base = json.loads((paths.STRATEGY_CONFIG_DIR / "bar.json").read_text())
     s, _, _ = apply_overrides(base, {}, list(overrides))
     if bars1 is None:
-        lo, hi = start - HISTORY - timedelta(days=1), end + timedelta(days=1)
+        lo, hi = start - max(HISTORY, TREND_HISTORY) - timedelta(days=1), end + timedelta(days=1)
         if fetch:
             histdata.download(lo, hi, progress=progress)
         bars1 = to_bars(histdata.load_1m(lo, hi))

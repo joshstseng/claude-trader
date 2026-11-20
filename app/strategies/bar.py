@@ -23,7 +23,9 @@
                filters.accumulation_since "03:30": no trade if no 5m or 15m FVG has formed since then
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
                last 1h break of structure; breakouts against it are skipped. "1h_inverse" (test, 2026-11-20):
-               the opposite, only breakouts against that bias are taken
+               the opposite, only breakouts against that bias are taken. "mtf" (the user's read, 2026-11-20):
+               4h, 1h and 15m each read by tf_bias (gaps decide, BOS/CISD confirm, trend_big_candles big
+               candles), 2 of the 3 must agree with the breakout
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
                optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R
 
@@ -40,7 +42,7 @@ from __future__ import annotations
 import math
 from bisect import bisect_left
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app.strategies.mrs import Bar, contracts_for, resample
@@ -109,6 +111,97 @@ def atr(bars: list[Bar], span: timedelta, t: datetime, n: int = 14) -> float | N
 
 
 # ------------------------------------------------------------------ the pieces
+
+ET = ZoneInfo("America/New_York")
+FOUR = timedelta(hours=4)
+
+
+def resample_4h(b5: list[Bar]) -> list[Bar]:
+    """5m -> 4h candles the way the user's chart draws NQ: from the 6 PM ET futures open (3, 7, 11 AM, 3, 7,
+    11 PM PT). A bucket counts with at least 40 of its 48 five-minute bars (the data has small holes)."""
+    groups: dict[datetime, list[Bar]] = {}
+    for b in b5:
+        et = b.start.astimezone(ET)
+        h = (et.hour - 18) % 24 // 4 * 4                        # hours since 6 PM ET, floored to 4
+        anchor = (et - timedelta(hours=(et.hour - 18) % 24, minutes=et.minute)).replace(second=0, microsecond=0)
+        key = (anchor + timedelta(hours=h)).astimezone(timezone.utc)
+        groups.setdefault(key, []).append(b)
+    return [Bar(k, g[0].o, max(x.h for x in g), min(x.l for x in g), g[-1].c) for k, g in sorted(groups.items())
+            if len(g) >= 40]
+
+
+def tf_bias(bars: list[Bar], span: timedelta, t: datetime, big_candles: int = 2) -> tuple[str | None, str]:
+    """The user's read of one timeframe (2026-11-20), finished candles only, over the current leg (from the older
+    of the latest swing high and swing low to now):
+      1. gaps decide. Only gaps not closed through before the leg count; in the leg each of these is a vote:
+         respected (a candle wicks in and closes back out on the gap's own side) -> the gap's side;
+         closed through (a close beyond its far side; the gap is dead after) -> the other side;
+         a new gap forming -> its side. A close inside a gap is undecided. Size doesn't matter.
+         More votes wins; a tie goes to the latest.
+      2. confirmed by a break of structure (even a wick beyond the latest swing) or a CISD (a close beyond the
+         previous candle's body) that way, in the leg
+      3. and `big_candles` candles that way in the leg, each with a range above the average of the 10 before it
+    Any step missing -> None."""
+    done = [b for b in bars if b.start + span <= t]
+    if len(done) < 15:
+        return None, "not enough history"
+    highs, lows = swings(done, span)
+    highs, lows = [p for p in highs if p[2] <= t], [p for p in lows if p[2] <= t]
+    if not (highs and lows):
+        return None, "no swings yet"
+    leg = min(highs[-1][3], lows[-1][3])
+    ev: list[tuple[int, str]] = []                                     # (candle index, bull/bear)
+    for g in fvgs(done, span):
+        bull = g["kind"] == "bull"
+        if g["j"] > leg:
+            ev.append((g["j"], g["kind"]))                             # a new gap
+        for k in range(g["j"] + 1, len(done)):
+            x = done[k]
+            if (x.c < g["lo"]) if bull else (x.c > g["hi"]):            # closed through: dead
+                if k > leg:
+                    ev.append((k, "bear" if bull else "bull"))
+                break
+            if k > leg and ((x.l <= g["hi"] and x.c > g["hi"]) if bull else (x.h >= g["lo"] and x.c < g["lo"])):
+                ev.append((k, g["kind"]))                              # respected
+    if not ev:
+        return None, "no gap events in the leg"
+    nb = sum(e[1] == "bull" for e in ev)
+    side = ("bull" if nb > len(ev) - nb else "bear") if nb * 2 != len(ev) else max(ev)[1]
+    up = side == "bull"
+    confirmed = False
+    for k in range(leg + 1, len(done)):
+        x, p = done[k], done[k - 1]
+        prior = [s_ for s_ in (highs if up else lows) if s_[3] + 2 < k]
+        bos = prior and ((x.h > prior[-1][0]) if up else (x.l < prior[-1][0]))
+        cisd = (x.c > max(p.o, p.c)) if up else (x.c < min(p.o, p.c))
+        if (bos or cisd) and ((x.c > x.o) if up else (x.c < x.o)):
+            confirmed = True
+            break
+    if not confirmed:
+        return None, f"gaps say {side}, no BOS/CISD yet"
+    big = 0
+    for k in range(max(leg + 1, 10), len(done)):
+        x = done[k]
+        avg = sum(b.h - b.l for b in done[k - 10:k]) / 10
+        if x.h - x.l > avg and ((x.c > x.o) if up else (x.c < x.o)):
+            big += 1
+    if big < big_candles:
+        return None, f"gaps say {side}, only {big} big candle(s)"
+    return side, f"{side}: {nb} bull / {len(ev) - nb} bear gap votes, confirmed, {big} big"
+
+
+def bias_mtf(b15: list[Bar], h1: list[Bar], h4: list[Bar], t: datetime, big_candles: int = 2) -> tuple[str | None, str]:
+    """The 4h, 1h and 15m reads together: at least 2 of the 3 agree, else None (wait for alignment).
+    Later idea (not built): when one timeframe disagrees, look for a level that could flip it (a 15m FVG,
+    the 8:00 candle)."""
+    reads = [(name, tf_bias(bars, span, t, big_candles)[0]) for name, bars, span in
+             (("4h", h4, FOUR), ("1h", h1, HOUR), ("15m", b15, FIFTEEN))]
+    why = " ".join(f"{n} {r or '-'}" for n, r in reads)
+    for side in ("bull", "bear"):
+        if sum(r == side for _, r in reads) >= 2:
+            return side, why
+    return None, why
+
 
 def bias_1h(h1: list[Bar], t: datetime) -> tuple[str | None, str]:
     """('bull'/'bear'/None, why) as of t: the most recent 1h FVG price came back into and respected (no 1h
@@ -330,9 +423,11 @@ def _tick(x: float, tick: float, down: bool) -> float:
     return round((math.floor(q + 1e-9) if down else math.ceil(q - 1e-9)) * tick, 10)
 
 
-def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = None) -> Day8:
+def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = None,
+            trend_b5: list[Bar] | None = None) -> Day8:
     """bars1: 1m bars from a few days before (for 15m/1h structure) through the session.
-    ath_before: the highest high of all data before bars1 (for filters.ath_longs_only_pct)."""
+    ath_before: the highest high of all data before bars1 (for filters.ath_longs_only_pct).
+    trend_b5: 5m bars going back ~30 days (for trend_filter "mtf": the 4h needs more history)."""
     out = Day8(day.isoformat())
     w = s["window"]
     ref_t, look_t, expire_t, flat_t = (_at(day, w[k]) for k in ("reference", "breakouts_from", "order_until", "flat"))
@@ -359,6 +454,14 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
     placed = brk.start + FIVE
     bias = None
     tf = s.get("trend_filter")
+    if tf == "mtf":                              # the user's 4h / 1h / 15m read, 2 of 3 aligned
+        tb = [b for b in (trend_b5 or b5) if b.start < placed]
+        cut = lambda d: [b for b in tb if b.start >= placed - timedelta(days=d)]          # noqa: E731
+        bias, why = bias_mtf(resample(cut(4), 15), resample(cut(10), 60), resample_4h(cut(30)), placed,
+                             s.get("trend_big_candles", 2))
+        if bias != ("bull" if long else "bear"):
+            out.why = ("no 4h/1h/15m alignment" if bias is None else "against the 4h/1h/15m trend") + f" ({why})"
+            return out
     if tf in ("1h", "1h_inverse"):
         bias, _ = bias_1h(h1, placed)
         if tf == "1h" and bias != ("bull" if long else "bear"):

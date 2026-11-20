@@ -18,6 +18,7 @@
     "cancel_if_target_first": false
   },
   "trend_filter": "1h",
+  "trend_big_candles": 2,
   "filters": {
     "ath_longs_only_pct": null,
     "accumulation_since": null
