@@ -8,7 +8,7 @@ Version A, "trend pullback" (the one built so far):
     stop the extreme of the cross bar and the entry bar (lowest low for a long), plus a small buffer
     exit the middle band (moves each bar) or 2R, whichever comes first; the stop first if a bar hits both;
          everything flat at the session end
-    risk 1% of the account per trade (whole contracts); the session stops after a 2R loss; one trade at a time
+    risk 1% of the account per trade (whole contracts); the session stops at -2R or +3R net; one trade at a time
 
 Everything here is pure: bars in, setups and trades out. The live bot (Discord, Tradovate) and the backtest
 scenarios come later. Times: bars are tagged by their START; a 5m bar's values are known at start + 5 min.
@@ -175,6 +175,7 @@ class SessionResult:
     trades: list[Trade] = field(default_factory=list)
     skipped: list[dict] = field(default_factory=list)   # {"at", "side", "why"}
     stopped_for_loss: bool = False
+    stopped_for_win: bool = False
 
     @property
     def pnl_usd(self) -> float:
@@ -308,8 +309,11 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
                 pending_i = pending["i_cross"]
                 pending = None
                 why = None
+                win_cap = s["account"].get("max_session_win_r")
                 if realized_r <= -loss_cap_r:
                     why, res.stopped_for_loss = "session loss limit (2R) reached", True
+                elif win_cap is not None and realized_r >= win_cap:
+                    why, res.stopped_for_win = f"session win limit ({win_cap:g}R) reached", True
                 elif b.start + FIVE > last_entry:
                     why = "too late in the session"
                 if why is None:

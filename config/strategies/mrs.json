@@ -44,6 +44,7 @@
     "size_usd": 50000,
     "risk_pct": 0.01,
     "max_session_loss_r": 2,
+    "max_session_win_r": 3,
     "max_contracts": 20
   },
   "contract": {

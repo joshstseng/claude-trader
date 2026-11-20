@@ -177,6 +177,21 @@ class SessionTest(unittest.TestCase):
         self.assertTrue(r.stopped_for_loss)
         self.assertIn("session loss limit", r.skipped[-1]["why"])
 
+    def test_a_3r_session_stops_trading(self):
+        any_rsi = copy.deepcopy(S)
+        any_rsi["filters"]["rsi_long_above"] = 0
+        win = {9: 20.0}                                         # a rally to 2R right after each entry
+        moves = {6: -30.0, 7: 5.0, **win,
+                 30: -30.0, 31: 5.0, 33: 20.0,
+                 54: -30.0, 55: 5.0}                            # third setup: skipped after ~3.8R
+        r = mrs.run_session(series(moves), D, any_rsi)
+        self.assertEqual([t.result for t in r.trades], ["2R", "2R"])              # +3.7R after costs
+        self.assertTrue(r.stopped_for_win)
+        self.assertIn("session win limit", r.skipped[-1]["why"])
+        no_cap = copy.deepcopy(any_rsi)
+        no_cap["account"]["max_session_win_r"] = None
+        self.assertFalse(mrs.run_session(series(moves), D, no_cap).stopped_for_win)
+
     def test_no_peeking_at_an_unfinished_bar(self):
         """At a 4:30 PM cross: RSI from the 3:00 PM 1h bar (complete at 4:00, the 4:00 one isn't done),
         ADX from the 4:15 15m bar (complete at 4:30)."""

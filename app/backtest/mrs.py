@@ -140,6 +140,7 @@ def headline(sessions: list[mrs.SessionResult], s: dict) -> dict:
         "wins": sum(p > 0 for p in pnl), "results": dict(Counter(t.result for t in trades)),
         "skips": dict(Counter(_why(k["why"]) for x in sessions for k in x.skipped).most_common()),
         "stopped_for_loss": sum(x.stopped_for_loss for x in sessions),
+        "stopped_for_win": sum(x.stopped_for_win for x in sessions),
         "account_usd": s["account"]["size_usd"],
     }
     if n:
