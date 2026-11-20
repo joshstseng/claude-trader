@@ -92,7 +92,7 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - Its own Discord bot and Railway service; reads the shared database
 - **Combined daily summary** across all bots (each bot's own summary can stay or be retired)
 - **Watchdog:** a bot's heartbeat older than ~3 minutes during market hours → @mention in `#system`; the trading bots watch the head's heartbeat in turn
-- **Global controls:** `/pause-all`, `/resume-all`, `/flatten-all` (via the commands table; each bot flattens its own account); total money at risk across bots shown in `/fleet` (global limits enforced later)
+- **Global controls:** `/pause-all`, `/resume-all`, `/flatten-all` (via the commands table; each bot flattens its own account); total money at risk across bots shown in `/status` (global limits enforced later)
 
 **Done when:** stopping a bot on Railway gets you pinged within ~3 minutes, the combined summary posts after the close, and `/flatten-all` closes a test position through the bot.
 
@@ -100,12 +100,12 @@ The ORB bot's brain becomes **one strategy module behind a common contract**; ev
 - [app/head.py](../app/head.py): the same code started with `BOT_ROLE=head` (its own folder `bots/head/`, `[HEAD]` in logs); its own Discord bot (`DISCORD_BOT_TOKEN_HEAD`, refused if it equals a trading bot's token); no broker keys; needs `DATABASE_URL`
 - Watchdog: heartbeat older than 3 min, 9:00 AM ET to 20 min after the close → @mention once per outage, "back" when it returns; bots with no heartbeat for 3 days count as retired. The trading bots watch the head (5 min, market hours) and their heartbeat note now says `running` / `paused (own /pause)` / `paused (global)`
 - Daily summary: *(changed 2026-11-20, your call: avoid a cluttered channel as bots are added)* the head is the **only poster in `#daily-summary`**. Each bot saves its full after-close summary in a `daily_reports` table; the head posts one message once every bot has reported (or at 5:00 PM ET, naming a missing one) with each bot's full summary in a thread under it. Catch-up for the previous market day; remembered in the database so a restart can't repeat it. A bot that can't reach the database posts its own summary
-- Slash commands (Discord names can't have spaces): `/fleet`, `/pause-all`, `/resume-all`, `/flatten-all confirm:yes`
+- Slash commands (Discord names can't have spaces): `/status`, `/pause-all`, `/resume-all`, `/flatten-all confirm:yes`
 - Commands table: `fleet_commands` + `fleet_command_acks`. Each trading bot checks every 5 s, acts only on commands under 2 minutes old (a bot starting later never acts on an old one), runs the same flatten as its own `/flatten` (shared code), posts the result in `#system` and answers
 
 **ORB regression checks (all passed):** 212 tests on SQLite and on a throwaway local Postgres (17 new); baseline rerun run #10 = run #1 on all 20,690 signals; live Yahoo path normal; the head bot logged into Discord and wrote its heartbeat (against the throwaway database). The ORB bot's changes are small and only additive: the heartbeat note, watching the head, and answering the head's commands
 
-**Going live (2026-11-19):** pushed during market hours with nothing open (you OK'd it); the head runs as a second service in the **same Railway project** as the ORB bot and Postgres. Left to check: `/fleet`, `/pause-all` → `/resume-all`, `/flatten-all` with nothing open, and the watchdog ping (stop the ORB service on a market day inside the watch window, outside the 9:45–11:35 AM scan)
+**Going live (2026-11-19):** pushed during market hours with nothing open (you OK'd it); the head runs as a second service in the **same Railway project** as the ORB bot and Postgres. Left to check: `/status`, `/pause-all` → `/resume-all`, `/flatten-all` with nothing open, and the watchdog ping (stop the ORB service on a market day inside the watch window, outside the 9:45–11:35 AM scan)
 
 ### The head bot from here
 v1 only watches and relays. Where it grows, in order:

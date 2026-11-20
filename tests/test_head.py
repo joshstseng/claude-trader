@@ -335,6 +335,63 @@ class DailyReportTest(unittest.TestCase):
             self.assertEqual(bot.daily, ["fallback"])               # never lost
 
 
+class StatusTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = tradelog.TradeLog(Path(self.tmp.name) / "t.db")
+        head.NAMES.clear()
+
+    def tearDown(self):
+        head.NAMES.clear()
+        self.log.close()
+        self.tmp.cleanup()
+
+    def test_heartbeats_keep_the_discord_name_and_status(self):
+        self.log.beat("orb", "running", name="Orbi", status="**ORB bot** running")
+        self.log.beat("orb", "paused (global)")                   # a beat without them keeps the last ones
+        r = self.log.heartbeats()[0]
+        self.assertEqual((r["note"], r["name"], r["status"]), ("paused (global)", "Orbi", "**ORB bot** running"))
+
+    def test_find_a_bot_by_any_name(self):
+        self.log.beat("orb", name="Orbi")
+        self.log.beat("head", name="Uri")
+        beats = self.log.heartbeats()
+        head.learn_names(beats)
+        for q, want in (("Orbi", "orb"), ("orbi", "orb"), ("orb", "orb"), ("Uri", "head"), ("head", "head"),
+                        ("all", "all"), ("", "all"), ("nobody", None)):
+            self.assertEqual(head.find_bot(beats, q), want, q)
+        self.assertEqual(head.bot_name("orb"), "Orbi")
+
+    def test_a_trading_bots_status(self):
+        now = datetime.now(timezone.utc)
+        self.log.beat("orb", "running", name="Orbi", status="Focus list: 150 stocks\nNext check 10:05 AM ET")
+        head.learn_names(self.log.heartbeats())
+        text = head.bot_status_text(self.log, "orb", now)
+        self.assertIn("**Orbi** 🟢 running", text)
+        self.assertIn("Next check 10:05 AM ET", text)
+        self.assertIn("Today: 0 orders", text)
+
+    def test_the_heads_own_status(self):
+        self.log.beat("orb", name="Orbi")
+        self.log.beat("head", name="Uri")
+        head.learn_names(self.log.heartbeats())
+        now = datetime.now(timezone.utc)
+        text = head.head_status_text(self.log, now, SESSION, now)
+        self.assertIn("**Uri** (head bot)", text)
+        self.assertIn("Watching: Orbi", text)
+        self.assertIn("Global pause: off", text)
+        self.assertIn("Market closed today", head.head_status_text(self.log, now, None, None))
+
+    def test_status_command_routes_by_name(self):
+        self.log.beat("orb", "running", name="Orbi", status="its own words")
+        self.log.beat("head", name="Uri")
+        bot = head.make_head_bot(head.HeadSettings("x", 1, 2, 3, 4), self.log, market.SkillCalendar())
+        self.assertIn("its own words", bot.status_for("Orbi"))
+        self.assertIn("(head bot)", bot.status_for("uri"))
+        self.assertIn("Money at risk across bots", bot.status_for("all"))
+        self.assertIn("No bot called **zed**. Try: all, Uri, Orbi", bot.status_for("zed"))
+
+
 class SettingsTest(unittest.TestCase):
     def test_the_head_needs_its_own_discord_bot(self):
         env = {"DISCORD_BOT_TOKEN_HEAD": "same", "DISCORD_BOT_TOKEN": "same", "DISCORD_GUILD_ID": "1",

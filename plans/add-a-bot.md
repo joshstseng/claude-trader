@@ -41,7 +41,7 @@ Its own account means its trades never mix with another bot's, and the 3:55 PM s
 
 ## 5. Then
 - It runs its own 1a/1b-style live gates (a clean week of alerts, then paper trading)
-- The head bot (2b.4) picks it up automatically from its first heartbeat: watchdog, fleet summary, `/fleet`, `/pause-all`, `/flatten-all`. Nothing to set up on the head
+- The head bot (2b.4) picks it up automatically from its first heartbeat: watchdog, fleet summary, `/status`, `/pause-all`, `/flatten-all`. Nothing to set up on the head
 
 ## What keeps bots apart (built in 2b.2)
 | Thing | How it's kept separate |

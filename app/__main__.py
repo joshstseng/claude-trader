@@ -171,7 +171,7 @@ async def restart_check(bot, calendar, rules: dict, orb) -> None:
         asyncio.create_task(later())
 
 
-async def heartbeat(every_s: int = 60, state: AppState | None = None, notify=None) -> None:
+async def heartbeat(every_s: int = 60, state: AppState | None = None, notify=None, bot=None) -> None:
     """Step 2b.3: tell the shared database this bot is alive (the head bot's watchdog reads it).
     2b.4: the note says whether it's paused, and the bot watches the head's heartbeat in turn
     (during market hours; a silent head never stops trading, it's just worth knowing)."""
@@ -185,7 +185,14 @@ async def heartbeat(every_s: int = 60, state: AppState | None = None, notify=Non
 
             def write() -> None:
                 note = "paused (own /pause)" if own else "paused (global)" if hb.global_pause() else "running"
-                hb.beat(strategies.active_id(), note)
+                name = status = None
+                if bot is not None:                 # for the head's /status <bot>
+                    name = bot.user.name if bot.user else None
+                    try:
+                        status = bot.status_text()
+                    except Exception:  # noqa: BLE001
+                        status = None
+                hb.beat(strategies.active_id(), note, name=name, status=status)
             await asyncio.to_thread(write)
             if notify is not None and state is not None:
                 now = datetime.now(timezone.utc)
@@ -314,7 +321,7 @@ async def live(dcfg, calendar, make_day, state, trade_log, rules, orb) -> None:
                                                 notify=bot.post_system, after_close=after_close,
                                                 catch_up=catch_up, flatten=flatten))
         stream_task = asyncio.create_task(track_trades(bot, rules))
-        asyncio.create_task(heartbeat(state=state, notify=bot.post_system))
+        asyncio.create_task(heartbeat(state=state, notify=bot.post_system, bot=bot))
         asyncio.create_task(fleet_commands(bot))
         if bot.cards is not None:
             asyncio.create_task(bot.cards.refresh_loop())

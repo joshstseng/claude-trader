@@ -7,7 +7,8 @@ What it does:
                     3+ minutes during market hours gets you an @mention in #system (and "back" when it returns)
     fleet summary   the only post in #daily-summary: after the close, once every bot has handed in its
                     report (or by 5:00 PM ET), one line per bot, with each bot's full summary in a thread
-    /fleet          every bot: alive?, paused?, today's signals and P&L, open trades and money at risk
+    /status [bot]   all (default): every bot alive?, paused?, today's numbers, money at risk;
+                    a bot's name (e.g. Orbi, Uri): that bot's own status
     /pause-all      sets the shared global pause (every bot reads it before an alert or an order)
     /resume-all     lifts it (a bot's own /pause stays as it was)
     /flatten-all    global pause + a "flatten" command in the shared database; each bot closes its own
@@ -69,8 +70,82 @@ def head_settings() -> HeadSettings:
 
 # ------------------------------------------------------------------------ helpers
 
+NAMES: dict[str, str] = {}      # bot id -> its Discord name (from the heartbeats), e.g. orb -> Orbi
+INSTANCE = (os.environ.get("RAILWAY_DEPLOYMENT_ID") or f"pid{os.getpid()}")[:12]
+
+
 def bot_name(bot_id: str) -> str:
-    return "Head bot" if bot_id == HEAD else f"{bot_id.upper()} bot"
+    return NAMES.get(bot_id) or ("Head bot" if bot_id == HEAD else f"{bot_id.upper()} bot")
+
+
+def learn_names(beats) -> None:
+    for r in beats:
+        try:
+            if r["name"]:
+                NAMES[r["bot"]] = r["name"]
+        except (KeyError, IndexError):
+            pass
+
+
+def find_bot(beats, query: str) -> str | None:
+    """'Orbi', 'orb', 'ORB bot', 'Uri', 'head' -> the bot id; 'all' -> 'all'; None if unknown."""
+    q = (query or "all").strip().lower()
+    if q in ("all", "fleet", "*"):
+        return "all"
+    for r in beats:
+        names = {r["bot"].lower(), bot_name(r["bot"]).lower()}
+        try:
+            if r["name"]:
+                names.add(r["name"].lower())
+        except (KeyError, IndexError):
+            pass
+        if q in names:
+            return r["bot"]
+    return None
+
+
+def bot_status_text(trade_log: tradelog.TradeLog, bot: str, now: datetime) -> str:
+    """/status <trading bot>: alive?, its own status (as it last reported it), today's numbers."""
+    day = now.astimezone(NY).strftime("%Y-%m-%d")
+    b = next((r for r in trade_log.heartbeats() if r["bot"] == bot), None)
+    if b is None:
+        return f"**{bot_name(bot)}**: no heartbeat yet."
+    a = age_s(b, now)
+    lines = [f"**{bot_name(bot)}** " + (f"🟢 {b['note'] or 'running'}" if a <= STALE_S else "🔴 **silent**")
+             + f" · heard {_ago(a)}"]
+    status = b["status"] if "status" in b.keys() else None
+    if status:
+        lines.append(f"-# its own status, as of {_when(b['at']).astimezone(NY):%-I:%M %p} ET:")
+        lines.append(status)
+    else:
+        lines.append("-# (its own status shows here after its next restart)")
+    n = bot_numbers(trade_log, bot, day)
+    lines.append(f"Today: {n['orders']} orders · closed {_usd(n['day_pnl'])} · open {n['open']} "
+                 f"(at risk ${n['at_risk']:,.2f}) · all-time {_usd(n['all_time'])}")
+    return "\n".join(lines)[:1990]
+
+
+def head_status_text(trade_log: tradelog.TradeLog, now: datetime, session, started: datetime | None) -> str:
+    """/status <the head>: what the head itself is doing."""
+    day = now.astimezone(NY).strftime("%Y-%m-%d")
+    bots = fleet_bots(trade_log, now)
+    lines = [f"🧭 **{bot_name(HEAD)}** (head bot) 🟢 watching"
+             + (f" · online since {started.astimezone(NY):%a %-I:%M %p} ET" if started else "")]
+    lines.append("Watching: " + (", ".join(bot_name(b) for b in bots) or "no bots yet")
+                 + f" · watchdog {'**on** now' if watching(now, session) else 'off now'} "
+                 "(9:00 AM ET to 20 min after the close, market days)")
+    lines.append("Global pause: " + ("⏸️ **on** (`/resume-all`)" if trade_log.global_pause() else "off"))
+    if session is None:
+        lines.append("Market closed today: no daily summary.")
+    elif trade_log.fleet(f"head_summary:{day}") or trade_log.fleet("head_summary_day") == day:
+        lines.append("Today's summary: ✅ posted")
+    else:
+        got = {r["bot"] for r in trade_log.reports(day)}
+        waiting = [bot_name(b) for b in bots if b not in got]
+        lines.append("Today's summary: after 4:15 PM ET, once every bot reports (5:00 PM at the latest)"
+                     + (f" · waiting for {', '.join(waiting)}" if waiting and got else ""))
+    lines.append(f"-# deploy {INSTANCE}")
+    return "\n".join(lines)[:1990]
 
 
 def _when(iso: str) -> datetime:
@@ -301,6 +376,7 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
             self.tree = app_commands.CommandTree(self)
             self.ready = asyncio.Event()
             self.watchdog = Watchdog(exclude={HEAD})
+            self.started = datetime.now(timezone.utc)
             self._last_error_post = 0.0
             self._add_commands()
 
@@ -312,6 +388,20 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
         async def on_ready(self) -> None:
             log.info("Discord: logged in as %s", self.user)
             self.ready.set()
+
+        def status_for(self, query: str) -> str:
+            now = datetime.now(timezone.utc)
+            beats = self.log.heartbeats()
+            learn_names(beats)
+            which = find_bot(beats, query)
+            if which is None:
+                known = ", ".join(["all"] + [bot_name(r["bot"]) for r in beats])
+                return f"No bot called **{query}**. Try: {known}"
+            if which == "all":
+                return status_text(self.log, now, self.session(now))
+            if which == HEAD:
+                return head_status_text(self.log, now, self.session(now), self.started)
+            return bot_status_text(self.log, which, now)
 
         def session(self, now: datetime):
             return self.calendar.session(now.astimezone(NY).date())
@@ -334,9 +424,10 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
 
         async def tick(self) -> None:
             now = datetime.now(timezone.utc)
-            await asyncio.to_thread(self.log.beat, HEAD, "watching")
+            await asyncio.to_thread(self.log.beat, HEAD, "watching", name=self.user.name if self.user else None)
             session = self.session(now)
             beats = await asyncio.to_thread(self.log.heartbeats)
+            learn_names(beats)
             for text, ping in self.watchdog.check(beats, now, watching(now, session)):
                 await self.post(cfg.channel_system, text, ping=ping)
             await self.summary_if_due(now, session)
@@ -411,13 +502,25 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
             tree = self.tree
             owner = app_commands.check(lambda i: i.user.id == cfg.owner_id)
 
-            @tree.command(name="fleet", description="Every bot: alive?, paused?, today's trades, money at risk")
+            @tree.command(name="status", description="A bot's status by name (e.g. Orbi, Uri), or all of them")
+            @app_commands.describe(bot="a bot's name, or all (the default)")
             @owner
-            async def fleet(interaction: discord.Interaction):
+            async def status(interaction: discord.Interaction, bot: str = "all"):
                 await interaction.response.defer(ephemeral=True)
-                now = datetime.now(timezone.utc)
-                text = await asyncio.to_thread(status_text, self.log, now, self.session(now))
+                text = await asyncio.to_thread(self.status_for, bot)
                 await interaction.followup.send(text, ephemeral=True)
+
+            @status.autocomplete("bot")
+            async def status_bots(interaction: discord.Interaction, current: str):
+                try:
+                    beats = await asyncio.to_thread(self.log.heartbeats)
+                except Exception:  # noqa: BLE001
+                    beats = []
+                learn_names(beats)
+                now = datetime.now(timezone.utc)
+                names = ["all"] + [bot_name(r["bot"]) for r in beats if age_s(r, now) <= RECENT_DAYS * 86400]
+                return [app_commands.Choice(name=n, value=n) for n in names
+                        if current.lower() in n.lower()][:25]
 
             @tree.command(name="pause-all", description="Pause EVERY bot: no new alerts or orders (open trades stay protected)")
             @owner
@@ -487,8 +590,12 @@ async def _live(cfg: HeadSettings, trade_log: tradelog.TradeLog) -> None:
         if bot_task.done():
             bot_task.result()
         now = datetime.now(timezone.utc)
+        await asyncio.to_thread(trade_log.set_fleet, "head_instance", INSTANCE)   # this copy is the live one
+        beats = await asyncio.to_thread(trade_log.heartbeats)
+        learn_names(beats)
+        NAMES[HEAD] = bot.user.name if bot.user else NAMES.get(HEAD, "Head bot")
         bots = await asyncio.to_thread(fleet_bots, trade_log, now)
-        await bot.post(cfg.channel_system, "🧭 **Head bot online** · watching: "
+        await bot.post(cfg.channel_system, f"🧭 **{bot_name(HEAD)} (head bot) online** · watching: "
                        + (", ".join(bot_name(b) for b in bots) or "no bots yet")
                        + (" · ⏸️ global pause is **on**" if await asyncio.to_thread(trade_log.global_pause) else ""))
         loop_task = asyncio.create_task(bot.run_loop())
@@ -497,8 +604,11 @@ async def _live(cfg: HeadSettings, trade_log: tradelog.TradeLog) -> None:
         except asyncio.CancelledError:
             log.info("Stopping")
             try:
-                await asyncio.wait_for(bot.post(cfg.channel_system, "🔴 **Head bot stopped.** The trading bots "
-                                                "carry on; no watchdog until it's back."), 10)
+                replaced = await asyncio.to_thread(trade_log.fleet, "head_instance") not in (None, INSTANCE)
+                text = (f"-# 🔄 The previous copy of {bot_name(HEAD)} shut down: the new deploy has taken over."
+                        if replaced else f"🔴 **{bot_name(HEAD)} (head bot) stopped.** The trading bots carry on; "
+                        "no watchdog until it's back.")
+                await asyncio.wait_for(bot.post(cfg.channel_system, text), 10)
             except Exception:  # noqa: BLE001
                 pass
         finally:

@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS outcomes (
 
 # columns added after the first version (added to existing databases on open)
 MIGRATIONS = {
+    "heartbeats": [("name", "TEXT"), ("status", "TEXT")],     # 2b.4: Discord name and /status text
     "orders": [("stop_order_id", "TEXT"), ("target_order_id", "TEXT"), ("entry_slippage", "REAL"),
                ("exit_slippage", "REAL"), ("live_card_channel_id", "TEXT"), ("live_card_message_id", "TEXT"),
                ("closed_card_message_id", "TEXT")],
@@ -264,10 +265,13 @@ class TradeLog:
 
     # ------------------------------------------------------------ fleet (2b.3)
 
-    def beat(self, bot: str, note: str | None = None) -> None:
-        """This bot is alive (the head bot's watchdog reads it)."""
-        self.db.execute("INSERT INTO heartbeats (bot, at, note) VALUES (?, ?, ?) ON CONFLICT (bot) DO UPDATE"
-                        " SET at = excluded.at, note = excluded.note", (bot, _now(), note))
+    def beat(self, bot: str, note: str | None = None, *, name: str | None = None, status: str | None = None) -> None:
+        """This bot is alive (the head bot's watchdog reads it), with its Discord name and its /status
+        text when given (the head's /status <bot> shows them)."""
+        self.db.execute("INSERT INTO heartbeats (bot, at, note, name, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT (bot)"
+                        " DO UPDATE SET at = excluded.at, note = excluded.note,"
+                        " name = COALESCE(excluded.name, heartbeats.name),"
+                        " status = COALESCE(excluded.status, heartbeats.status)", (bot, _now(), note, name, status))
         self.db.commit()
 
     def heartbeats(self) -> list:
