@@ -488,7 +488,25 @@ def cmd_backtest_data(a) -> int:
     return 0
 
 
+def cmd_backtest_mrs(a) -> int:
+    """Mr. S (NQ futures): its own runner, same run numbering and reports; Uri posts it."""
+    from app.backtest import mrs as bt
+    logs.setup()
+    res = bt.run(date.fromisoformat(a.start), date.fromisoformat(a.end), label=a.label, overrides=a.set or [],
+                 progress=lambda m: logging.getLogger("app").info("[backtest] %s", m))
+    m = res.headline
+    print(f"\nRun #{res.run_id} ({res.label}): {m['sessions']} sessions, {m['trades']} trades"
+          + (f", {m['avg_r']:+.3f}R a trade after costs, total ${m['total_usd']:+,.0f}" if m["trades"] else ""))
+    print(f"Report: {res.report_path}")
+    if not a.no_post:
+        print("Posted to #backtests (by Uri)." if bt.post(res.run_id) else
+              "Not posted (set DISCORD_CHANNEL_BACKTESTS in .env to post runs to Discord).")
+    return 0
+
+
 def cmd_backtest(a) -> int:
+    if a.strategy == "mrs":
+        return cmd_backtest_mrs(a)
     from app.backtest import run as bt
     logs.setup()
     res = bt.run(date.fromisoformat(a.start), date.fromisoformat(a.end), label=a.label, overrides=a.set or [],

@@ -178,5 +178,43 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(mrs.session_bounds(D, S)[0].astimezone(mrs.ZoneInfo("America/New_York")).hour, 19)
 
 
+class BacktestTest(unittest.TestCase):
+    def test_a_run_is_saved_and_summarised(self):
+        import tempfile
+        from pathlib import Path
+        from app.backtest import mrs as bt
+        bars = series({**DIP, 9: 20.0})
+        with tempfile.TemporaryDirectory() as d:
+            res = bt.run(D, D, label="baseline", db_path=Path(d) / "b.db", reports=Path(d) / "r", bars=bars)
+            self.assertEqual((res.headline["sessions"], res.headline["trades"]), (1, 1))
+            self.assertEqual(res.headline["results"], {"2R": 1})
+            doc = json.loads((Path(d) / "r" / f"run-{res.run_id}.json").read_text())
+            self.assertEqual(doc["settings"]["strategy"]["id"], "mrs")
+            text = bt.summary(doc)
+            self.assertIn("[Mr. S] Backtest", text)
+            self.assertIn("1 trades", text)
+            self.assertIn("far too few", text)
+            res2 = bt.run(D, D, label="ADX 101", overrides=["filters.adx_min=101"], db_path=Path(d) / "b.db",
+                          reports=Path(d) / "r", bars=bars)
+            self.assertEqual(res2.headline["trades"], 0)
+            self.assertEqual(res2.run_id, res.run_id + 1)
+            with self.assertRaises(ValueError):
+                bt.run(D, D, label="x", overrides=["filters.nope=1"], db_path=Path(d) / "b.db",
+                       reports=Path(d) / "r", bars=bars)
+
+    def test_yahoo_bars_drop_the_unfinished_one(self):
+        from datetime import timezone
+        from app.backtest import mrs as bt
+        t0 = int(datetime(2026, 11, 20, 17, 0, tzinfo=timezone.utc).timestamp())
+        doc = {"chart": {"result": [{"timestamp": [t0, t0 + 300, t0 + 361],
+                                     "indicators": {"quote": [{"open": [1, 2, 3], "high": [1, 2, 3], "low": [1, 2, 3],
+                                                               "close": [1, 2, 3], "volume": [0, 0, 0]}]}}]}}
+        now = datetime.fromtimestamp(t0 + 400, timezone.utc)
+        self.assertEqual([b.c for b in bt.parse_yahoo(doc, now)], [1.0])       # t0+300 still forming; odd tick
+        old = [mrs.Bar(datetime.fromtimestamp(t0, timezone.utc), 0, 0, 0, 0)]
+        merged = bt.merge(old, bt.parse_yahoo(doc, now))
+        self.assertEqual([b.c for b in merged], [1.0])
+
+
 if __name__ == "__main__":
     unittest.main()

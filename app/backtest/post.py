@@ -92,11 +92,14 @@ def post(run_id: int) -> bool:
     """Post run `run_id` to #backtests as the strategy's own bot when it has one. False if the
     channel isn't set up."""
     import dataclasses
+    run = load(run_id)
+    if _sid(run) == "mrs":                      # Mr. S's runs have their own summary (posted by Uri)
+        from app.backtest import mrs
+        return mrs.post(run_id)
     channel = settings.discord_backtests_channel()
     if channel is None:
         return False
     from app.discord_bot import post_once
-    run = load(run_id)
     token, own = poster_for(_sid(run))
     cfg = settings.discord_settings()
     if token:

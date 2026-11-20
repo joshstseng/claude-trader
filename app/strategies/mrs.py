@@ -159,6 +159,7 @@ class Trade:
     result: str | None = None     # middle / 2R / stop / session_end
     r: float | None = None        # after costs
     pnl_usd: float | None = None  # after costs
+    cost_usd: float | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -231,6 +232,7 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
                                   * (2 if why in ("stop", "session_end") else 1))
         trade.exit, trade.exit_at, trade.result = round(price, 2), at, why
         trade.pnl_usd = round(pts * c["point_value"] * trade.contracts - cost, 2)
+        trade.cost_usd = round(cost, 2)
         risk = abs(trade.entry - trade.stop) * c["point_value"] * trade.contracts
         trade.r = round(trade.pnl_usd / risk, 3) if risk else None
         realized_r += trade.r or 0.0
