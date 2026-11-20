@@ -1,5 +1,7 @@
 # Mr. S: NQ mean reversion (bot #2 candidate)
 
+> **Scratched 2026-11-20.** 6 years of tests (Asia and NY AM, trend-pullback and range-fade versions, 5m and 1m entries, an AMD accumulation gate) found no edge. Mr. S now runs the **8 AM retest** strategy: [mrs8-strategy.md](mrs8-strategy.md).
+
 Your strategy (2026-11-20), "Mr. S" in Discord, strategy id `mrs`. **Micro Nasdaq futures (MNQ)**, the **Asia session** first, then NY AM. Part of [step-2b-bot-fleet.md → 2b.6](step-2b-bot-fleet.md#2b6-bot-2-when-a-second-strategy-earns-it). Hours and the head bot's side: [head-session-hours.md](head-session-hours.md).
 
 ## Where it stands

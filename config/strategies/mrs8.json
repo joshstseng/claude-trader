@@ -2,7 +2,7 @@
   "id": "mrs8",
   "name": "Mr. S (8 AM retest, NQ)",
   "enabled": false,
-  "note": "Backtest only (app/strategies/mrs8.py). Times are Pacific.",
+  "note": "Backtest only (app/strategies/mrs8.py). Times are Pacific. Defaults = the baseline (run #35 = #34, set 2026-11-20).",
   "symbol": "MNQ",
   "data_source": "histdata",
   "window": {
@@ -15,18 +15,18 @@
   "trend_filter": "1h",
   "stop": {
     "swing_tf": "1h",
-    "max_stop_atr": 2.0,
+    "max_stop_atr": 3.0,
     "min_stop_points": 5,
     "buffer_ticks": 2
   },
   "target": {
-    "mode": "1h",
+    "mode": "flat",
     "level_min_r": 2.0,
     "level_max_r": 4.0,
     "default_r": 2.0
   },
   "exit": {
-    "breakeven_at_r": null
+    "breakeven_at_r": 1.0
   },
   "account": {
     "size_usd": 50000,
