@@ -1,6 +1,6 @@
-# Mr. S: NQ mean reversion (bot #2 candidate)
+# NQ mean reversion (scratched; once "Mr. S")
 
-> **Scratched 2026-11-20.** 6 years of tests (Asia and NY AM, trend-pullback and range-fade versions, 5m and 1m entries, an AMD accumulation gate) found no edge. Mr. S now runs the **8 AM retest** strategy: [mrs8-strategy.md](mrs8-strategy.md).
+> **Scratched 2026-11-20.** 6 years of tests (Asia and NY AM, trend-pullback and range-fade versions, 5m and 1m entries, an AMD accumulation gate) found no edge. Replaced by **Break and Retest** (Brix): [bar-strategy.md](bar-strategy.md).
 
 Your strategy (2026-11-20), "Mr. S" in Discord, strategy id `mrs`. **Micro Nasdaq futures (MNQ)**, the **Asia session** first, then NY AM. Part of [step-2b-bot-fleet.md → 2b.6](step-2b-bot-fleet.md#2b6-bot-2-when-a-second-strategy-earns-it). Hours and the head bot's side: [head-session-hours.md](head-session-hours.md).
 
@@ -10,7 +10,7 @@ Your strategy (2026-11-20), "Mr. S" in Discord, strategy id `mrs`. **Micro Nasda
 | Rules, indicators, the session walk (`app/strategies/mrs.py`, `config/strategies/mrs.json`, `tests/test_mrs.py`) | ✅ built 2026-11-20 |
 | Backtest scenarios (one combination at a time, each a saved, repeatable run) | ⬜ next |
 | 1m data (years of it) for the real backtest and the 1m entry | ⬜ Databento free credits, or a Kaggle dataset |
-| Live bot: Tradovate demo, Discord cards, its own Railway service | ⬜ later, only if the backtest earns it ([mrs-discord.md](mrs-discord.md): M1 join the server → M2 shadow mode → M3 demo) |
+| Live bot: Tradovate demo, Discord cards, its own Railway service | ⬜ later, only if the backtest earns it ([bar-discord.md](bar-discord.md): M1 join the server → M2 shadow mode → M3 demo) |
 | NY AM session | ⬜ after Asia |
 | Range-fade version (ADX < 20, both sides) | ⬜ eventually |
 

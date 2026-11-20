@@ -1,6 +1,6 @@
 {
   "id": "mrs",
-  "name": "Mr. S (NQ mean reversion)",
+  "name": "NQ mean reversion (scratched)",
   "enabled": false,
   "note": "Not a live bot yet: strategy + indicators only (plans/mrs-strategy.md). Backtest scenarios next; Tradovate later.",
   "symbol": "MNQ",

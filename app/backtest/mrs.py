@@ -1,4 +1,4 @@
-"""Mr. S backtests (plans/mrs-strategy.md): NQ 5m bars -> every session -> saved run -> #backtests (by Uri).
+"""NQ mean-reversion backtests (scratched 2026-11-20) (plans/mrs-strategy.md): NQ 5m bars -> every session -> saved run -> #backtests (by Uri).
 
     python -m app backtest --strategy mrs --from 2026-09-14 --to 2026-11-20 --label baseline
     python -m app backtest --strategy mrs --from … --to … --set filters.adx_min=25 --label "ADX 25"
@@ -237,7 +237,7 @@ def _day(iso: str) -> str:
 
 
 def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
-    """The latest Mr. S run labeled 'baseline' on the same data (2 months of Yahoo isn't comparable to years)."""
+    """The latest mean reversion run labeled 'baseline' on the same data (2 months of Yahoo isn't comparable to years)."""
     best = None
     me = reports / f"run-{run_id}.json"
     data = json.loads(me.read_text())["settings"].get("data") if me.exists() else None
@@ -279,7 +279,7 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
     sess = s["session"]
     period = (f"{_day(doc['first_session'])} → {_day(doc['last_session'])}" if doc.get("first_session")
               else f"{_day(doc['from'])} → {_day(doc['to'])}")
-    lines = [f"## 🧪 Mr. S · Backtest #{doc['run_id']} · {doc['label']}",
+    lines = [f"## 🧪 Mean reversion (scratched) · Backtest #{doc['run_id']} · {doc['label']}",
              f"-# {sess['name']} {_hours(sess['start'], sess['end'])} PT · {period} · {m['sessions']} sessions"]
     if not m["trades"]:
         lines.append("No trades.")
@@ -324,7 +324,7 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
 def report_md(doc: dict) -> str:
     m = doc["headline"]
     text = "\n".join(x[3:] if x.startswith("-# ") else x for x in summary(doc).replace("**", "").splitlines()[1:])
-    out = [f"# Mr. S backtest #{doc['run_id']}: {doc['label']}", "", text, "",
+    out = [f"# Mean reversion backtest #{doc['run_id']}: {doc['label']}", "", text, "",
            "## Settings", "```json", json.dumps(doc["settings"]["strategy"], indent=1), "```", ""]
     if m.get("skips"):
         out += ["## Setups skipped", "| Why | Count |", "|---|---|"]
@@ -342,7 +342,7 @@ def report_md(doc: dict) -> str:
 
 
 def post(run_id: int, reports: Path = REPORTS) -> bool:
-    """Uri (the head bot) posts Mr. S's run to #backtests while Mr. S has no Discord bot of his own.
+    """Uri (the head bot) posts these runs to #backtests.
     False if #backtests isn't set up."""
     import dataclasses
     channel = settings.discord_backtests_channel()

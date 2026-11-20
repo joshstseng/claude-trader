@@ -1,8 +1,8 @@
-"""Free years of Nasdaq-100 1-minute bars from HistData.com (NSXUSD), for Mr. S's backtests.
+"""Free years of Nasdaq-100 1-minute bars from HistData.com (NSXUSD), for the NQ backtests.
 
 NSXUSD tracks the Nasdaq-100 on futures hours (6 PM to ~4:15 PM ET, Sunday to Friday), so the Asia session
 is covered. Prices sit a little off NQ futures (the basis); bands, RSI, ADX and stop distances are relative
-moves, so it stands in well for testing. Volume is always 0 (Mr. S doesn't use it).
+moves, so it stands in well for testing. Volume is always 0 (the NQ strategies don't use it).
 
 One zip per year (the current year: one per month), each a CSV of
     20230102 180000;open;high;low;close;0

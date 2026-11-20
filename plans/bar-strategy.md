@@ -1,6 +1,6 @@
-# Mr. S: 8 AM retest (NQ, NY AM)
+# Break and Retest ("bar"), run by Brix
 
-Your strategy (2026-11-20), from studying RP Profits, run by Mr. S (strategy id `mrs8`). It replaces the mean-reversion version ([mrs-strategy.md](mrs-strategy.md), scratched after 6 years of tests showed no edge). Code: `app/strategies/mrs8.py`, settings `config/strategies/mrs8.json`, backtests `python -m app backtest --strategy mrs8 …` (Uri posts them to `#backtests`).
+Your strategy (2026-11-20), from studying RP Profits, run by **Brix** in Discord (strategy id `bar`; renamed from Mr. S / `mrs8` on 2026-11-20). It replaced the scratched mean-reversion strategy ([mrs-strategy.md](mrs-strategy.md), scratched after 6 years of tests showed no edge). Code: `app/strategies/bar.py`, settings `config/strategies/bar.json`, backtests `python -m app backtest --strategy bar …` (Uri posts them to `#backtests` until Brix has his own Discord bot).
 
 ## The baseline (run #35, set 2026-11-20)
 The config defaults. Every new run is compared against it. All times Pacific.

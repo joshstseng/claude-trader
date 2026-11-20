@@ -488,8 +488,9 @@ def cmd_backtest_data(a) -> int:
     return 0
 
 
-def cmd_backtest_mrs(a) -> int:
-    """Mr. S (NQ futures): its own runner, same run numbering and reports; Uri posts it."""
+def cmd_backtest_nq(a) -> int:
+    """The NQ strategies (bar: Break and Retest; mrs: the scratched mean reversion): their own runners, same run
+    numbering and reports; Uri posts them."""
     import importlib
     bt = importlib.import_module(f"app.backtest.{a.strategy}")
     logs.setup()
@@ -506,8 +507,8 @@ def cmd_backtest_mrs(a) -> int:
 
 
 def cmd_backtest(a) -> int:
-    if a.strategy in ("mrs", "mrs8"):
-        return cmd_backtest_mrs(a)
+    if a.strategy in ("mrs", "bar"):
+        return cmd_backtest_nq(a)
     from app.backtest import run as bt
     logs.setup()
     res = bt.run(date.fromisoformat(a.start), date.fromisoformat(a.end), label=a.label, overrides=a.set or [],

@@ -93,7 +93,7 @@ def post(run_id: int) -> bool:
     channel isn't set up."""
     import dataclasses
     run = load(run_id)
-    if _sid(run) in ("mrs", "mrs8"):            # Mr. S's runs have their own summary (posted by Uri)
+    if _sid(run) in ("mrs", "bar"):             # the NQ strategies have their own summary (posted by Uri / Brix)
         import importlib
         return importlib.import_module(f"app.backtest.{_sid(run)}").post(run_id)
     channel = settings.discord_backtests_channel()

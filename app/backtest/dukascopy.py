@@ -1,9 +1,9 @@
-"""Free years of Nasdaq-100 1-minute bars from Dukascopy's public data feed, for Mr. S's backtests.
+"""Free years of Nasdaq-100 1-minute bars from Dukascopy's public data feed, for the NQ backtests.
 
 The instrument is Dukascopy's Nasdaq-100 CFD (USATECHIDXUSD): it tracks the cash index, so its prices sit a
 little off NQ futures (the basis), but it trades nearly around the clock like NQ, including the Asia session.
 Bands, RSI, ADX and stop distances are all relative moves, so it stands in well for testing; volume isn't
-real exchange volume (Mr. S doesn't use it).
+real exchange volume (the NQ strategies don't use it).
 
 One file per UTC day: .../USATECHIDXUSD/<year>/<month 0-based>/<day>/BID_candles_min_1.bi5, LZMA-compressed
 24-byte records (seconds into the day, open, close, low, high as integers / 1000, volume as a float).

@@ -1,4 +1,4 @@
-"""Mr. S, "8 AM retest" (strategy id mrs8): NQ/MNQ, NY AM. Your rules (2026-11-20), all times Pacific:
+"""Break and Retest ("bar") (strategy id bar): NQ/MNQ, NY AM. Your rules (2026-11-20), all times Pacific:
 
     reference  the 5:00–5:15 AM 15m candle (8:00 AM ET): its high, low and midpoint
     breakout   from the 6:05 AM 5m bar on (window.breakouts_from), the first 5m candle that CLOSES beyond the

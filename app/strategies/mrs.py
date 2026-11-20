@@ -1,4 +1,4 @@
-"""Mr. S: Bollinger mean-reversion on NQ futures (MNQ), Asia session first. Plan: plans/mrs-strategy.md
+"""NQ Bollinger mean reversion (scratched 2026-11-20; once "mean reversion") on NQ futures (MNQ), Asia session first. Plan: plans/mrs-strategy.md
 
 Version A, "trend pullback" (the default settings):
     1h   RSI(14) > 55 -> longs only, < 45 -> shorts only (indicators.rsi_minutes)

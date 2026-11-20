@@ -1,8 +1,8 @@
 {
-  "id": "mrs8",
-  "name": "Mr. S (8 AM retest, NQ)",
+  "id": "bar",
+  "name": "Break and Retest (NQ, NY AM)",
   "enabled": false,
-  "note": "Backtest only (app/strategies/mrs8.py). Times are Pacific. Defaults = the baseline (run #35 = #34, set 2026-11-20).",
+  "note": "Backtest only (app/strategies/bar.py). Times are Pacific. Defaults = the baseline (run #35 = #34, set 2026-11-20).",
   "symbol": "MNQ",
   "data_source": "histdata",
   "window": {

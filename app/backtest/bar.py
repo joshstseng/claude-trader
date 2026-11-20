@@ -1,9 +1,9 @@
-"""Mr. S "8 AM retest" backtests (app/strategies/mrs8.py), on HistData's Nasdaq-100 1m bars.
+"""Break and Retest backtests (app/strategies/bar.py), on HistData's Nasdaq-100 1m bars.
 
-    python -m app backtest --strategy mrs8 --from 2021-01-01 --to 2026-10-31 --label baseline
-    python -m app backtest --strategy mrs8 --from … --to … --set trend_filter=1h --label "1h trend"
+    python -m app backtest --strategy bar --from 2021-01-01 --to 2026-10-31 --label baseline
+    python -m app backtest --strategy bar --from … --to … --set trend_filter=1h --label "1h trend"
 
-Same run numbering and storage as every backtest; Uri posts each run to #backtests.
+Same run numbering and storage as every backtest; Brix posts each run to #backtests once DISCORD_BOT_TOKEN_BAR is in .env; until then Uri does.
 """
 
 from __future__ import annotations
@@ -21,26 +21,26 @@ from app import paths, settings, tradelog
 from app.backtest import histdata
 from app.backtest.mrs import _day, _r2, _usd, to_bars
 from app.backtest.run import DB, REPORTS, apply_overrides
-from app.strategies import mrs8
+from app.strategies import bar
 
 HISTORY = timedelta(days=5)          # 15m and 1h structure before each morning
 
 
-def run_days(bars1, start: date, end: date, s: dict) -> list[mrs8.Day8]:
+def run_days(bars1, start: date, end: date, s: dict) -> list[bar.Day8]:
     times = [b.start for b in bars1]
     out, day = [], start
     while day <= end:
         if day.weekday() < 5:
-            lo = datetime.combine(day, datetime.min.time(), tzinfo=mrs8.PT) - HISTORY
-            hi = datetime.combine(day, datetime.min.time(), tzinfo=mrs8.PT) + timedelta(hours=10)
+            lo = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) - HISTORY
+            hi = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) + timedelta(hours=10)
             chunk = bars1[bisect_left(times, lo):bisect_left(times, hi)]
-            if any(b.start.astimezone(mrs8.PT).date() == day for b in chunk):
-                out.append(mrs8.run_day(chunk, day, s))
+            if any(b.start.astimezone(bar.PT).date() == day for b in chunk):
+                out.append(bar.run_day(chunk, day, s))
         day += timedelta(days=1)
     return out
 
 
-def headline(days: list[mrs8.Day8], s: dict) -> dict:
+def headline(days: list[bar.Day8], s: dict) -> dict:
     T = [d.trade for d in days if d.trade]
     n = len(T)
     m = {"days": len(days), "trades": n, "longs": sum(t.side == "long" for t in T),
@@ -75,7 +75,7 @@ class Run8:
 
 def run(start: date, end: date, *, label: str, overrides=(), db_path: Path = DB, reports: Path = REPORTS,
         fetch: bool = True, bars1=None, progress=print) -> Run8:
-    base = json.loads((paths.STRATEGY_CONFIG_DIR / "mrs8.json").read_text())
+    base = json.loads((paths.STRATEGY_CONFIG_DIR / "bar.json").read_text())
     s, _, _ = apply_overrides(base, {}, list(overrides))
     if bars1 is None:
         lo, hi = start - HISTORY - timedelta(days=1), end + timedelta(days=1)
@@ -87,7 +87,7 @@ def run(start: date, end: date, *, label: str, overrides=(), db_path: Path = DB,
     snapshot = {"strategy": s, "overrides": list(overrides), "data": histdata.NOTE}
     log_db = tradelog.TradeLog(db_path)
     try:
-        run_id = log_db.start_run("mrs8", "backtest", snapshot, label=label, date_from=start.isoformat(),
+        run_id = log_db.start_run("bar", "backtest", snapshot, label=label, date_from=start.isoformat(),
                                   date_to=end.isoformat())
         log_db.finish_run(run_id)
         code = log_db.run(run_id)["code_version"]
@@ -112,7 +112,7 @@ def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
     best = None
     for f in reports.glob("run-*.json"):
         r = json.loads(f.read_text())
-        if (((r.get("settings") or {}).get("strategy") or {}).get("id") == "mrs8"
+        if (((r.get("settings") or {}).get("strategy") or {}).get("id") == "bar"
                 and (r.get("label") or "").lower() == "baseline" and r["run_id"] != run_id):
             if best is None or r["run_id"] > best["run_id"]:
                 best = r
@@ -122,7 +122,7 @@ def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
 def summary(doc: dict, baseline: dict | None = None) -> str:
     m = doc["headline"]
     period = f"{_day(doc['first_day'])} → {_day(doc['last_day'])}" if doc.get("first_day") else ""
-    lines = [f"## 🧪 Mr. S · 8 AM retest · Backtest #{doc['run_id']} · {doc['label']}",
+    lines = [f"## 🧪 Brix · Break and Retest · Backtest #{doc['run_id']} · {doc['label']}",
              f"-# NY AM · 8:00 ET candle, breakouts from {_clock(doc['settings']['strategy']['window']['breakouts_from'])} "
              f"PT · {period} · {m['days']} days"]
     if not m["trades"]:
@@ -160,7 +160,7 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
 
 
 def report_md(doc: dict) -> str:
-    out = [f"# Mr. S 8 AM retest, backtest #{doc['run_id']}: {doc['label']}", "",
+    out = [f"# Break and Retest, backtest #{doc['run_id']}: {doc['label']}", "",
            "\n".join(x[3:] if x.startswith("-# ") else x for x in summary(doc).replace("**", "").splitlines()[1:]), "",
            "## Settings", "```json", json.dumps(doc["settings"]["strategy"], indent=1), "```", "",
            "## Trades (Pacific time)",
@@ -181,7 +181,7 @@ def post(run_id: int, reports: Path = REPORTS) -> bool:
     from app.discord_bot import post_once
     doc = json.loads((reports / f"run-{run_id}.json").read_text())
     cfg = settings.discord_settings()
-    token = (os.environ.get("DISCORD_BOT_TOKEN_HEAD") or "").strip()
+    token = (os.environ.get("DISCORD_BOT_TOKEN_BAR") or os.environ.get("DISCORD_BOT_TOKEN_HEAD") or "").strip()
     if token:
         cfg = dataclasses.replace(cfg, bot_token=token)
     asyncio.run(post_once(cfg, channel, [(summary(doc, find_baseline(run_id, reports)), None, None)],

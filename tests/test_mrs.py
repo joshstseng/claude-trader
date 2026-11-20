@@ -1,4 +1,4 @@
-"""Mr. S: indicators and the session walk (plans/mrs-strategy.md)."""
+"""NQ mean reversion (scratched): indicators and the session walk (plans/mrs-strategy.md)."""
 
 import copy
 import json
@@ -255,7 +255,7 @@ class BacktestTest(unittest.TestCase):
             doc = json.loads((Path(d) / "r" / f"run-{res.run_id}.json").read_text())
             self.assertEqual(doc["settings"]["strategy"]["id"], "mrs")
             text = bt.summary(doc)
-            self.assertIn("Mr. S · Backtest", text)
+            self.assertIn("Mean reversion (scratched) · Backtest", text)
             self.assertIn("1 trades", text)
             self.assertIn("too few to judge", text)
             res2 = bt.run(D, D, label="ADX 101", overrides=["filters.adx_min=101"], db_path=Path(d) / "b.db",
