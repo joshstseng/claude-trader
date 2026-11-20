@@ -176,13 +176,13 @@ class UserRulesTest(unittest.TestCase):
         self.s["filters"] = {"ath_longs_only_pct": None, "accumulation_since": None}
 
     def test_defaults_are_the_baseline(self):
-        """Baseline run #57 = #55 (2026-11-20): rules 1–5, the 4h/1h/15m trend read, break-even at the 15m level else 2R."""
+        """Baseline run #63 = #62 (2026-11-20): rules 1–5, the 4h/1h/15m trend read, break-even at the 15m level else 2R, trailing."""
         self.assertEqual(S["entry"], {"midpoint": "body", "small_body_atr": 0.5, "cancel_if_target_first": True})
         self.assertEqual(S["filters"], {"ath_longs_only_pct": 0.5, "accumulation_since": "03:30"})
         self.assertEqual((S["target"]["mode"], S["trend_filter"], S["trend_big_candles"], S["trend_legs_back"]),
                          ("levels", "mtf", 0, 1))
         self.assertEqual(S["exit"], {"breakeven_at_r": 2.0, "breakeven_level": "15m", "breakeven_level_min_r": 0.5,
-                                     "breakeven_sig5m": False, "trail_gaps": False, "trail_1m_after_r": 2.0})
+                                     "breakeven_sig5m": True, "trail_gaps": True, "trail_1m_after_r": 2.0})
 
     def test_body_midpoint_unless_small(self):
         ref = Bar(T0, 100, 130, 90, 110)                         # candle mid 110, body mid 105, body 10

@@ -1,6 +1,6 @@
 # Brix: what we're adding from the user's discretion
 
-Rules taken from the user's own trading ([October journal](bar-journal/2026-10.md), [trades](bar-journal/2026-10-trades.csv)), ordered **easiest to hardest** to build. **Baseline is now run #57 (= #55: rules 1–5, the user's 4h/1h/15m trend read, break-even at the first 15m internal level else 2R; +0.092R a trade, +$15.7k; set 2026-11-20).** Before that #52 (= #49), and #35. Each is tested **one at a time** against the baseline over the full 6 years, then kept or dropped.
+Rules taken from the user's own trading ([October journal](bar-journal/2026-10.md), [trades](bar-journal/2026-10-trades.csv)), ordered **easiest to hardest** to build. **Baseline is now run #63 (= #62: rules 1–5, the user's 4h/1h/15m trend read, break-even at the first 15m internal level or a 5m high inside a gap, else 2R, and trailing to pullback lows; +0.103R a trade, +$17.9k; set 2026-11-20).** Before that #57 (= #55), #52 (= #49), #35. Each is tested **one at a time** against the baseline over the full 6 years, then kept or dropped.
 
 October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9R on 17 with the trend filter off).
 
