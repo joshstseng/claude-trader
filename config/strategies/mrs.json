@@ -28,6 +28,8 @@
     "adx_min": 20
   },
   "entry": {
+    "timeframe": "5m",
+    "max_wait_minutes": 10,
     "cross": "5m close outside the band",
     "back_inside": "any part of the body inside the band",
     "max_wait_bars": 2,

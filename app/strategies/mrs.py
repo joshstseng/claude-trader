@@ -18,12 +18,14 @@ NQ and MNQ trade at the same price, so NQ bars test MNQ (only the dollars per po
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 PT = ZoneInfo("America/Los_Angeles")
 FIVE = timedelta(minutes=5)
+ONE = timedelta(minutes=1)
 
 
 @dataclass(frozen=True)
@@ -187,9 +189,12 @@ def _round_tick(x: float, tick: float, down: bool) -> float:
     return round((math.floor(q + 1e-9) if down else math.ceil(q - 1e-9)) * tick, 10)
 
 
-def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
+def run_session(bars5: list[Bar], day: date, s: dict, bars1: list[Bar] | None = None) -> SessionResult:
     """Walk one session bar by bar. bars5 = 5m bars covering the session AND enough history before it
-    (the 15m ADX needs ~30 bars, about 8 hours, so include the day session before)."""
+    (RSI and ADX need several hours, so include the day session before).
+    entry.timeframe "1m" (needs bars1, the session's 1-minute bars): after the 5m setup, enter on the first
+    1m candle closing back toward the middle (bullish for a long, bearish for a short) with any part of its
+    body inside the band, within entry.max_wait_minutes; the trade is then managed minute by minute."""
     start, end = session_bounds(day, s)
     res = SessionResult(day.isoformat(), start.isoformat(), end.isoformat())
     ind = s["indicators"]
@@ -268,31 +273,121 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
                 to(trade.entry + sign * lock_r * risk, "lock_stop")
         move["prev_h"] = ext
 
+    def manage(b: Bar, mid: float | None, at: str, span: timedelta) -> None:
+        """One bar of an open trade: the stop first (if a bar touches both), then the nearer of 2R and the
+        middle band (levels known before the bar), the session end, then move the stop for the next bar."""
+        long = trade.side == "long"
+        stop = trade.stop_now if trade.stop_now is not None else trade.stop
+        if b.l <= stop if long else b.h >= stop:
+            gap = b.o < stop if long else b.o > stop
+            close_trade(b.o if gap else stop, at, move["why"])
+        else:
+            tgt = [(trade.target_2r, "2R")]
+            if mid is not None and rules.get("middle_band", True):
+                tgt.append((mid, "middle"))
+            tgt.sort(key=lambda x: x[0] if long else -x[0])            # the nearer one first
+            for level, why in tgt:
+                if (b.h >= level) if long else (b.l <= level):
+                    gap = (b.o > level) if long else (b.o < level)
+                    close_trade(b.o if gap else level, at, why)
+                    break
+        if trade is not None and b.start + span >= end:
+            close_trade(b.c, at, "session_end")
+        if trade is not None:
+            step_stop(b)                       # at this bar's close: move the stop for the next bar
+
+    def refuse(side: str, entry: float, ext: float, mid: float, entry_end: datetime):
+        """-> (why or None, stop, risk, contracts): the session limits, the clock, and the stop/reward checks."""
+        win_cap = s["account"].get("max_session_win_r")
+        if realized_r <= -loss_cap_r:
+            res.stopped_for_loss = True
+            return "session loss limit (2R) reached", None, None, None
+        if win_cap is not None and realized_r >= win_cap:
+            res.stopped_for_win = True
+            return f"session win limit ({win_cap:g}R) reached", None, None, None
+        if entry_end > last_entry:
+            return "too late in the session", None, None, None
+        buf = e["stop_buffer_ticks"] * c["tick"]
+        stop = _round_tick(ext - buf, c["tick"], True) if side == "long" else _round_tick(ext + buf, c["tick"], False)
+        risk = abs(entry - stop)
+        reward_mid = (mid - entry) if side == "long" else (entry - mid)
+        n = contracts_for(risk, s)
+        if risk < e["min_stop_points"]:
+            return f"stop too tight ({risk:.2f} pts < {e['min_stop_points']})", stop, risk, n
+        if reward_mid < rules["min_reward_r"] * risk:
+            return f"middle band too close ({reward_mid / risk:.2f}R < {rules['min_reward_r']}R)", stop, risk, n
+        if n < 1:
+            return f"stop too wide for 1% risk ({risk:.2f} pts)", stop, risk, n
+        return None, stop, risk, n
+
+    def open_trade(side, cross_at, entry_at, entry, stop, risk, mid, n, cross_known):
+        nonlocal trade
+        r_v, a_v = trend_at(cross_known)
+        sign = 1 if side == "long" else -1
+        move.update(why="stop", prev_h=None)
+        trade = Trade(side, cross_at, entry_at, round(entry, 2), stop,
+                      round(entry + sign * rules["target_r"] * risk, 2), round(mid, 2), n,
+                      round(r_v, 1), round(a_v, 1))
+
+    # ---- the 1m entry: find the candle, then manage minute by minute
+    use_1m = e.get("timeframe", "5m") == "1m"
+    if use_1m:
+        if bars1 is None:
+            raise ValueError("entry.timeframe 1m needs the 1-minute bars")
+        bars1 = sorted(bars1, key=lambda b: b.start)
+        t1 = [b.start for b in bars1]
+        ends5 = [b.start + FIVE for b in bars5]
+
+    def band_at(when: datetime):
+        """The Bollinger Band of the latest 5m bar finished by `when`."""
+        k = bisect_right(ends5, when) - 1
+        return bb[k] if k >= 0 else None
+
+    def tm(when: datetime) -> str:
+        return when.astimezone(start.tzinfo).isoformat(timespec="minutes")
+
+    def take_1m(i_cross: int, side: str) -> datetime:
+        """Search the 1m chart after the 5m setup; trade it if it qualifies. Returns when the 5m scan resumes."""
+        long = side == "long"
+        known = bars5[i_cross].start + FIVE
+        wait_end = known + timedelta(minutes=e.get("max_wait_minutes", 10))
+        ext = bars5[i_cross].l if long else bars5[i_cross].h
+        j = bisect_left(t1, known)
+        while j < len(bars1) and bars1[j].start < min(wait_end, end):
+            m = bars1[j]
+            ext = min(ext, m.l) if long else max(ext, m.h)
+            band = band_at(m.start + ONE)
+            if band is not None:
+                lower, mid, upper = band
+                ok = (m.c > m.o and m.c > lower) if long else (m.c < m.o and m.c < upper)   # body inside
+                if ok:
+                    why, stop, risk, n = refuse(side, m.c, ext, mid, m.start + ONE)
+                    if why is not None:
+                        res.skipped.append({"at": tm(m.start), "side": side, "why": why})
+                        return m.start + ONE
+                    open_trade(side, t(i_cross), tm(m.start), m.c, stop, risk, mid, n, known)
+                    k = j + 1
+                    while trade is not None and k < len(bars1) and bars1[k].start < end:
+                        x = bars1[k]
+                        b5 = band_at(x.start)
+                        manage(x, b5[1] if b5 else None, tm(x.start), ONE)
+                        k += 1
+                    if trade is not None:                             # the data ended before the session
+                        last = bars1[min(k, len(bars1)) - 1]
+                        close_trade(last.c, tm(last.start), "session_end")
+                    return datetime.fromisoformat(res.trades[-1].exit_at) + ONE
+            j += 1
+        res.skipped.append({"at": tm(min(wait_end, end)), "side": side, "why": "didn't come back inside in time"})
+        return wait_end
+
+    resume_at = None                            # 1m mode: the 5m scan waits while a setup or trade plays out
     for i in idx:
         b = bars5[i]
+        if resume_at is not None and b.start + FIVE <= resume_at:
+            continue
         # ---- manage an open trade on this bar (levels known before it: the previous bar's middle band)
         if trade is not None:
-            mid = bb[i - 1][1] if bb[i - 1] else None
-            long = trade.side == "long"
-            stop = trade.stop_now if trade.stop_now is not None else trade.stop
-            hit_stop = b.l <= stop if long else b.h >= stop
-            if hit_stop:
-                gap = b.o < stop if long else b.o > stop
-                close_trade(b.o if gap else stop, t(i), move["why"])
-            else:
-                tgt = [(trade.target_2r, "2R")]
-                if mid is not None and rules.get("middle_band", True):
-                    tgt.append((mid, "middle"))
-                tgt.sort(key=lambda x: x[0] if long else -x[0])        # the nearer one first
-                for level, why in tgt:
-                    if (b.h >= level) if long else (b.l <= level):
-                        gap = (b.o > level) if long else (b.o < level)
-                        close_trade(b.o if gap else level, t(i), why)
-                        break
-            if trade is not None and b.start + FIVE >= end:
-                close_trade(b.c, t(i), "session_end")
-            if trade is not None:
-                step_stop(b)                  # at this bar's close: move the stop for the next bar
+            manage(b, bb[i - 1][1] if bb[i - 1] else None, t(i), FIVE)
             continue
 
         if bb[i] is None:
@@ -308,37 +403,12 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
             if back:
                 pending_i = pending["i_cross"]
                 pending = None
-                why = None
-                win_cap = s["account"].get("max_session_win_r")
-                if realized_r <= -loss_cap_r:
-                    why, res.stopped_for_loss = "session loss limit (2R) reached", True
-                elif win_cap is not None and realized_r >= win_cap:
-                    why, res.stopped_for_win = f"session win limit ({win_cap:g}R) reached", True
-                elif b.start + FIVE > last_entry:
-                    why = "too late in the session"
-                if why is None:
-                    entry = b.c
-                    ext = (min(bars5[pending_i].l, b.l) if side == "long" else max(bars5[pending_i].h, b.h))
-                    buf = e["stop_buffer_ticks"] * c["tick"]
-                    stop = _round_tick(ext - buf, c["tick"], True) if side == "long" else _round_tick(ext + buf, c["tick"], False)
-                    risk = abs(entry - stop)
-                    reward_mid = (mid - entry) if side == "long" else (entry - mid)
-                    n = contracts_for(risk, s)
-                    if risk < e["min_stop_points"]:
-                        why = f"stop too tight ({risk:.2f} pts < {e['min_stop_points']})"
-                    elif reward_mid < rules["min_reward_r"] * risk:
-                        why = f"middle band too close ({reward_mid / risk:.2f}R < {rules['min_reward_r']}R)"
-                    elif n < 1:
-                        why = f"stop too wide for 1% risk ({risk:.2f} pts)"
+                ext = (min(bars5[pending_i].l, b.l) if side == "long" else max(bars5[pending_i].h, b.h))
+                why, stop, risk, n = refuse(side, b.c, ext, mid, b.start + FIVE)
                 if why is not None:
                     res.skipped.append({"at": t(i), "side": side, "why": why})
                     continue
-                r15v, a15v = trend_at(bars5[pending_i].start + FIVE)
-                sign = 1 if side == "long" else -1
-                move.update(why="stop", prev_h=None)
-                trade = Trade(side, t(pending_i), t(i), round(entry, 2), stop,
-                              round(entry + sign * rules["target_r"] * risk, 2), round(mid, 2), n,
-                              round(r15v, 1), round(a15v, 1))
+                open_trade(side, t(pending_i), t(i), b.c, stop, risk, mid, n, bars5[pending_i].start + FIVE)
                 if b.start + FIVE >= end:
                     close_trade(b.c, t(i), "session_end")
                 continue
@@ -366,6 +436,9 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
             continue
         if side == "short" and r15v >= f["rsi_short_below"]:
             res.skipped.append({"at": t(i), "side": side, "why": f"RSI {r15v:.1f} not < {f['rsi_short_below']}"})
+            continue
+        if use_1m:
+            resume_at = take_1m(i, side)
             continue
         pending = {"side": side, "i_cross": i, "waited": 0}
     if trade is not None and idx:                 # the data ended before the session did

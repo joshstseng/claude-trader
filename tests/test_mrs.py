@@ -250,6 +250,72 @@ class BacktestTest(unittest.TestCase):
         self.assertEqual([b.c for b in merged], [1.0])
 
 
+def series1(moves: dict[int, float] | None = None, inside: dict[int, list[float]] | None = None):
+    """1m bars (and the 5m bars built from them) on the same pattern as series(): each 5m move is split
+    into 5 equal 1m moves, unless `inside` gives that 5m bar's five 1m moves."""
+    from app.backtest.dukascopy import to_5m
+    moves, inside = moves or {}, inside or {}
+    t = datetime.combine(D, dtime(0, 30), tzinfo=PT)
+    stop_at = datetime.combine(D, dtime(22, 0), tzinfo=PT)
+    s_start = datetime.combine(D, dtime(16, 0), tzinfo=PT)
+    one, c, i = [], 20000.0, 0
+    while t < stop_at:
+        k = int((t - s_start) / mrs.FIVE) if t >= s_start else None
+        step = inside.get(k) or [(moves[k] if k in moves else (1.5 if i % 2 else 0.0)) / 5] * 5
+        for n, dm in enumerate(step):
+            o = c
+            c = o + dm
+            one.append(mrs.Bar(t + n * mrs.ONE, o, max(o, c) + 0.1, min(o, c) - 0.1, c))
+        t += mrs.FIVE
+        i += 1
+    rows = [[int(b.start.timestamp()), b.o, b.h, b.l, b.c] for b in one]
+    return one, to_5m(rows)
+
+
+class OneMinuteEntryTest(unittest.TestCase):
+    def setUp(self):
+        self.s = copy.deepcopy(S)
+        self.s["entry"]["timeframe"] = "1m"
+        self.s["entry"]["min_stop_points"] = 2
+
+    def test_enters_on_the_first_bullish_minute_back_inside(self):
+        one, five = series1({6: -30.0, 7: 10.0})
+        r = mrs.run_session(five, D, self.s, bars1=one)
+        t = r.trades[0]
+        when = datetime.fromisoformat(t.entry_at)
+        self.assertEqual(t.cross_at[11:16], "16:30")
+        self.assertTrue(datetime.fromisoformat(t.cross_at) + mrs.FIVE <= when < datetime.fromisoformat(t.cross_at) + 3 * mrs.FIVE)
+        m = next(b for b in one if b.start == when)
+        self.assertGreater(m.c, m.o)                                         # a bullish candle
+        self.assertEqual(t.entry, round(m.c, 2))
+        low = min(b.l for b in one if datetime.fromisoformat(t.cross_at) <= b.start <= when)
+        self.assertEqual(t.stop, mrs._round_tick(low - 0.5, 0.25, True))   # the swing low, 2 ticks below
+        with self.assertRaises(ValueError):
+            mrs.run_session(five, D, self.s)                                 # 1m needs 1m bars
+
+    def test_no_bullish_minute_in_10_minutes_drops_it(self):
+        one, five = series1({6: -30.0, 7: -1.0, 8: -1.0, 9: -1.0})
+        r = mrs.run_session(five, D, self.s, bars1=one)
+        self.assertNotIn("16:3", "".join(t.entry_at for t in r.trades))
+        self.assertIn("didn't come back inside in time", [x["why"] for x in r.skipped])
+
+    def test_one_minute_bars_settle_a_bar_that_hits_both(self):
+        """A 5m bar reaches 2R and then the stop: 5m bars can't tell, so the 5m walk counts the stop;
+        the 1m walk sees 2R first."""
+        one, five = series1({6: -30.0, 7: 10.0})
+        t0 = mrs.run_session(five, D, self.s, bars1=one).trades[0]
+        risk = t0.entry - t0.stop
+        k = int((datetime.fromisoformat(t0.entry_at) + mrs.ONE - datetime.combine(D, dtime(16, 0), tzinfo=PT))
+                / mrs.FIVE) + 1                                              # the next whole 5m bar
+        up, down = 2.2 * risk, -4.5 * risk
+        one, five = series1({6: -30.0, 7: 10.0}, inside={k: [up, down, 0.0, 0.0, 0.0]})
+        t1 = mrs.run_session(five, D, self.s, bars1=one).trades[0]
+        self.assertIn(t1.result, ("2R", "middle"))                          # a target first, not the stop
+        self.assertGreater(t1.r, 0)
+        bar = next(b for b in five if b.start == datetime.combine(D, dtime(16, 0), tzinfo=PT) + k * mrs.FIVE)
+        self.assertTrue(bar.h >= t1.target_2r and bar.l <= t1.stop)          # the 5m bar touched both
+
+
 class DukascopyTest(unittest.TestCase):
     @staticmethod
     def bi5(rows):

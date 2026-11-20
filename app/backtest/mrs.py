@@ -103,18 +103,26 @@ def bars_for(symbol: str, *, fetch: bool = True, progress=print) -> list[mrs.Bar
 
 # ------------------------------------------------------------------------ running it
 
-def run_sessions(bars: list[mrs.Bar], start: date, end: date, s: dict) -> list[mrs.SessionResult]:
-    """Every session that starts on a day from start to end (Pacific dates) and has bars."""
+def run_sessions(bars: list[mrs.Bar], start: date, end: date, s: dict,
+                 bars1: list[mrs.Bar] | None = None) -> list[mrs.SessionResult]:
+    """Every session that starts on a day from start to end (Pacific dates) and has bars.
+    bars1: 1-minute bars, for entry.timeframe 1m (each session gets its own slice)."""
     times = [b.start for b in bars]
+    times1 = [b.start for b in bars1] if bars1 else []
     out, day = [], start
     while day <= end:
         st, en = mrs.session_bounds(day, s)
         i, j = bisect_left(times, st - WARMUP), bisect_left(times, en)
         k = bisect_left(times, st)
         if k < j:                                          # the market was open
-            out.append(mrs.run_session(bars[i:j], day, s))
+            one = bars1[bisect_left(times1, st):bisect_left(times1, en)] if bars1 is not None else None
+            out.append(mrs.run_session(bars[i:j], day, s, bars1=one))
         day += timedelta(days=1)
     return out
+
+
+def to_bars(rows: list[list]) -> list[mrs.Bar]:
+    return [mrs.Bar(datetime.fromtimestamp(r[0], timezone.utc), *r[1:5]) for r in rows]
 
 
 def _why(text: str) -> str:
@@ -167,21 +175,26 @@ class MrsRun:
 
 
 def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_path: Path = DB,
-        reports: Path = REPORTS, fetch: bool = True, bars: list[mrs.Bar] | None = None, progress=print) -> MrsRun:
+        reports: Path = REPORTS, fetch: bool = True, bars: list[mrs.Bar] | None = None,
+        bars1: list[mrs.Bar] | None = None, progress=print) -> MrsRun:
     base = json.loads((paths.STRATEGY_CONFIG_DIR / "mrs.json").read_text())
     s, _, _ = apply_overrides(base, {}, list(overrides))
     source = s.get("data_source", "yahoo")
     if bars is None and source in ("histdata", "dukascopy"):
         import importlib
         feed = importlib.import_module(f"app.backtest.{source}")
-        bars = feed.bars_5m(start - WARMUP - timedelta(days=1), end + timedelta(days=1), fetch=fetch,
-                            progress=progress)
+        lo, hi = start - WARMUP - timedelta(days=1), end + timedelta(days=1)
+        bars = feed.bars_5m(lo, hi, fetch=fetch, progress=progress)
+        if s["entry"].get("timeframe", "5m") == "1m" and bars1 is None:
+            bars1 = to_bars(feed.load_1m(lo, hi))
     elif bars is None:
         bars = bars_for(s["data_symbol"], fetch=fetch, progress=progress)
     if not bars:
         raise RuntimeError(f"No bars for {start} → {end} ({source}).")
     first = bars[0].start.astimezone(mrs.PT).date()
-    sessions = run_sessions(bars, max(start, first), end, s)
+    if s["entry"].get("timeframe", "5m") == "1m" and bars1 is None:
+        raise RuntimeError("The 1m entry needs 1-minute data: use data_source=histdata (Yahoo has no 1m history).")
+    sessions = run_sessions(bars, max(start, first), end, s, bars1=bars1)
     m = headline(sessions, s)
     if source in ("histdata", "dukascopy"):
         import importlib
