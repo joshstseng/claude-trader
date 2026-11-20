@@ -22,6 +22,9 @@
   "trend_filter": "mtf",
   "trend_big_candles": 0,
   "trend_legs_back": 1,
+  "trend_votes": "event",
+  "trend_leg": "older",
+  "trend_half_life": null,
   "filters": {
     "ath_longs_only_pct": 0.5,
     "accumulation_since": "03:30"

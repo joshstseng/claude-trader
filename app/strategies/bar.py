@@ -139,7 +139,8 @@ def resample_4h(b5: list[Bar]) -> list[Bar]:
 
 
 def tf_bias(bars: list[Bar], span: timedelta, t: datetime, big_candles: int = 2,
-            legs_back: int = 0) -> tuple[str | None, str]:
+            legs_back: int = 0, per_gap: bool = False, leg_from: str = "older",
+            half_life: float | None = None) -> tuple[str | None, str]:
     """The user's read of one timeframe (2026-11-20), finished candles only, over the current leg (from the older
     of the latest swing high and swing low to now):
       1. gaps decide. Only gaps not closed through before the leg count; in the leg each of these is a vote:
@@ -151,6 +152,10 @@ def tf_bias(bars: list[Bar], span: timedelta, t: datetime, big_candles: int = 2,
          previous candle's body) that way, in the leg
       3. and `big_candles` candles that way in the leg, each with a range above the average of the 10 before it
     legs_back: if the leg has no gap events, step back up to that many legs.
+    per_gap: each gap votes once, by its latest state in the leg (else every touch is a vote).
+    leg_from: "older" = from the older of the latest swing high and low; "latest" = from the most recent one.
+    half_life: in candles; a gap's votes weigh less the longer the gap has existed: half every half_life candles
+    (None: all equal). The user (2026-11-20): recent gaps mean more, especially on the 15m.
     Note (2026-11-20): the user also reads where liquidity sits (10/28: the gaps said bull, but the bull run
     was ending and price needed to retrace to the stacked lows); not modelled.
     Any step missing -> None."""
@@ -163,36 +168,53 @@ def tf_bias(bars: list[Bar], span: timedelta, t: datetime, big_candles: int = 2,
         return None, "no swings yet"
     gaps = fvgs(done, span)
 
-    def events(leg: int) -> list[tuple[int, str]]:
-        ev: list[tuple[int, str]] = []                                 # (candle index, bull/bear)
+    def events(leg: int) -> list[tuple[int, str, int]]:
+        ev: list[tuple[int, str, int]] = []                            # (candle index, bull/bear, gap formed at)
         for g in gaps:
+            n0 = len(ev)
             bull = g["kind"] == "bull"
             if g["j"] > leg:
-                ev.append((g["j"], g["kind"]))                         # a new gap
+                ev.append((g["j"], g["kind"], g["j"]))                 # a new gap
             for k in range(g["j"] + 1, len(done)):
                 x = done[k]
                 if (x.c < g["lo"]) if bull else (x.c > g["hi"]):        # closed through: dead
                     if k > leg:
-                        ev.append((k, "bear" if bull else "bull"))
+                        ev.append((k, "bear" if bull else "bull", g["j"]))
                     break
                 if k > leg and ((x.l <= g["hi"] and x.c > g["hi"]) if bull else (x.h >= g["lo"] and x.c < g["lo"])):
-                    ev.append((k, g["kind"]))                          # respected
+                    ev.append((k, g["kind"], g["j"]))                  # respected
+            if per_gap and len(ev) - n0 > 1:
+                del ev[n0:-1]                                          # one vote per gap: its latest state
         return ev
 
-    leg = min(highs[-1][3], lows[-1][3])
+    def leg_start(before: int | None) -> int | None:
+        hs = [p[3] for p in highs if before is None or p[3] < before]
+        ls = [p[3] for p in lows if before is None or p[3] < before]
+        if leg_from == "latest":                 # from the most recent swing high or low
+            pts = hs + ls
+            return max(pts) if pts else None
+        return min(hs[-1], ls[-1]) if hs and ls else None
+
+    leg = leg_start(None)
     ev = events(leg)
     for _ in range(legs_back):                   # a short leg with no gap events: use the previous leg (2026-11-20)
         if ev:
             break
-        hs, ls = [p for p in highs if p[3] < leg], [p for p in lows if p[3] < leg]
-        if not (hs and ls):
+        prev = leg_start(leg)
+        if prev is None:
             break
-        leg = min(hs[-1][3], ls[-1][3])
+        leg = prev
         ev = events(leg)
     if not ev:
         return None, "no gap events in the leg"
     nb = sum(e[1] == "bull" for e in ev)
-    side = ("bull" if nb > len(ev) - nb else "bear") if nb * 2 != len(ev) else max(ev)[1]
+    if half_life:                                # newer gaps count more: weight halves every half_life candles of age
+        w = {"bull": 0.0, "bear": 0.0}
+        for _, sd, j in ev:
+            w[sd] += 0.5 ** ((len(done) - 1 - j) / half_life)
+        side = ("bull" if w["bull"] > w["bear"] else "bear") if w["bull"] != w["bear"] else max(ev)[1]
+    else:
+        side = ("bull" if nb > len(ev) - nb else "bear") if nb * 2 != len(ev) else max(ev)[1]
     up = side == "bull"
     confirmed = False
     for k in range(leg + 1, len(done)):
@@ -217,11 +239,14 @@ def tf_bias(bars: list[Bar], span: timedelta, t: datetime, big_candles: int = 2,
 
 
 def bias_mtf(b15: list[Bar], h1: list[Bar], h4: list[Bar], t: datetime, big_candles: int = 2,
-             legs_back: int = 0) -> tuple[str | None, str]:
+             legs_back: int = 0, per_gap: bool = False, leg_from: str = "older",
+             half_life: dict | None = None) -> tuple[str | None, str]:
     """The 4h, 1h and 15m reads together: at least 2 of the 3 agree, else None (wait for alignment).
     Later idea (not built): when one timeframe disagrees, look for a level that could flip it (a 15m FVG,
     the 8:00 candle)."""
-    reads = [(name, tf_bias(bars, span, t, big_candles, legs_back)[0]) for name, bars, span in
+    hl = half_life or {}
+    reads = [(name, tf_bias(bars, span, t, big_candles, legs_back, per_gap, leg_from, hl.get(name))[0])
+             for name, bars, span in
              (("4h", h4, FOUR), ("1h", h1, HOUR), ("15m", b15, FIFTEEN))]
     why = " ".join(f"{n} {r or '-'}" for n, r in reads)
     for side in ("bull", "bear"):
@@ -540,7 +565,9 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
         tb = [b for b in (trend_b5 or b5) if b.start < placed]
         cut = lambda d: [b for b in tb if b.start >= placed - timedelta(days=d)]          # noqa: E731
         bias, why = bias_mtf(resample(cut(4), 15), resample(cut(10), 60), resample_4h(cut(30)), placed,
-                             s.get("trend_big_candles", 2), s.get("trend_legs_back", 0))
+                             s.get("trend_big_candles", 2), s.get("trend_legs_back", 0),
+                             s.get("trend_votes", "event") == "gap", s.get("trend_leg", "older"),
+                             s.get("trend_half_life"))
         if bias != ("bull" if long else "bear"):
             out.why = ("no 4h/1h/15m alignment" if bias is None else "against the 4h/1h/15m trend") + f" ({why})"
             return out

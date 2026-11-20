@@ -50,6 +50,7 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
   - *To decide:* a testable definition of "stronger".
 
 ## Notes
+- **Trend read tuning (2026-11-20, against baseline #63 +0.103R):** one vote per gap + leg from the latest swing (#64 +0.033R; the user: one vote per gap won't work). Newer gaps weigh more by how long they've existed (`trend_half_life`), leg from the latest swing: #66 (2h/12h/2d) +0.063R, #67 (1h/6h/1d) +0.072R; older leg #68 +0.077R. #67's settings read October like the user on 17 of 22 days (vs 14), but none beats the baseline over 6 years. Baseline unchanged.
 - **No 9:00 close (run #58):** from 9:00 the stop trails the latest 1m candle's body instead (`window.after_flat="trail_1m_body"`). +0.094R vs +0.092R: the trades still open at 9:00 (about 1 in 10, averaging +0.7R) get stopped out within minutes, so it's nearly the same as closing.
 - **The user's liquidity read (10/28):** the gaps said bull, but the bull run was ending and price needed to retrace to the stacked lows below; the user went bear. And 10/15 (a no-trade day): the end of a bear trend, no liquidity, lows or gaps below, accumulating. Not modelled yet.
 - **Stops (October check):** Brix's entries line up with the user's (same minute most days), but its stops are about twice as wide (median ~75 pts vs ~35), mostly 1h swings and 15m order blocks further out. Item 9 matters.
