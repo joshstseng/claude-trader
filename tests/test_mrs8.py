@@ -69,6 +69,8 @@ class DayTest(unittest.TestCase):
         self.s["window"]["breakouts_from"] = "06:00"
         self.s["stop"]["swing_tf"] = "15m"
         self.s["target"].update(mode="5m", level_max_r=3.0)
+        self.s["stop"]["max_stop_atr"] = 100
+        self.s["exit"] = {"breakeven_at_r": None}
 
     def test_a_long_retest_to_2r(self):
         bars = day_bars({
