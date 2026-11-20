@@ -1,0 +1,40 @@
+{
+  "id": "mrs8",
+  "name": "Mr. S (8 AM retest, NQ)",
+  "enabled": false,
+  "note": "Backtest only (app/strategies/mrs8.py). Times are Pacific.",
+  "symbol": "MNQ",
+  "data_source": "histdata",
+  "window": {
+    "name": "NYAM",
+    "reference": "05:00",
+    "breakouts_from": "06:00",
+    "order_until": "08:00",
+    "flat": "09:00"
+  },
+  "trend_filter": "none",
+  "stop": {
+    "max_stop_atr": 2.0,
+    "min_stop_points": 5,
+    "buffer_ticks": 2
+  },
+  "target": {
+    "level_min_r": 2.0,
+    "level_max_r": 3.0,
+    "default_r": 2.0
+  },
+  "account": {
+    "size_usd": 50000,
+    "risk_pct": 0.01,
+    "max_contracts": 20
+  },
+  "contract": {
+    "tick": 0.25,
+    "point_value": 2.0
+  },
+  "costs": {
+    "commission_per_side": 0.75,
+    "slippage_ticks": 1,
+    "note": "limit entry and target: no slippage; stop and session-end exits: 1 tick"
+  }
+}
