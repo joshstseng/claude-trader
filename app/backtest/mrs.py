@@ -260,6 +260,8 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
             f"{m['trades']} trades  ·  {m['win_rate'] * 100:.0f}% win",
             "",
             f"**Exits** 🎯 {res.get('2R', 0)} at 2R · ↩️ {res.get('middle', 0)} middle · ❌ {res.get('stop', 0)} stop"
+            + (f" · ⚖️ {res['be_stop']} break-even" if res.get("be_stop") else "")
+            + (f" · 🔒 {res['lock_stop']} locked +1R" if res.get("lock_stop") else "")
             + (f" · ⏰ {res['session_end']} at close" if res.get("session_end") else ""),
             f"**Sides** {m['longs']} long · {m['shorts']} short",
             f"**Risk** ~{_usd(m.get('avg_risk_usd', 0)).lstrip('+')} a trade · worst drawdown {_usd(m['max_dd_usd'])}",

@@ -157,10 +157,11 @@ class Trade:
     adx: float                    # on the ADX chart (indicators.adx_minutes, e.g. 15m)
     exit_at: str | None = None
     exit: float | None = None
-    result: str | None = None     # middle / 2R / stop / session_end
+    result: str | None = None     # middle / 2R / stop / be_stop / lock_stop / session_end
     r: float | None = None        # after costs
     pnl_usd: float | None = None  # after costs
     cost_usd: float | None = None
+    stop_now: float | None = None # the stop after any moves (break-even, +1R); None = never moved
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -229,7 +230,7 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
         pts = (price - trade.entry) * sign
         cost = trade.contracts * (2 * s["costs"]["commission_per_side"]
                                   + s["costs"]["slippage_ticks"] * c["tick"] * c["point_value"]
-                                  * (2 if why in ("stop", "session_end") else 1))
+                                  * (2 if why in ("stop", "be_stop", "lock_stop", "session_end") else 1))
         trade.exit, trade.exit_at, trade.result = round(price, 2), at, why
         trade.pnl_usd = round(pts * c["point_value"] * trade.contracts - cost, 2)
         trade.cost_usd = round(cost, 2)
@@ -239,16 +240,44 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
         res.trades.append(trade)
         trade = None
 
+    move = {"why": "stop", "peak": None, "prev_h": None}   # this trade's stop moves (exit.breakeven_at_r...)
+
+    def step_stop(b: Bar) -> None:
+        """After a bar closes: +1R reached -> stop to break-even (exit.breakeven_at_r); an internal high beyond
+        exit.lock_r (a bar's extreme past that level, confirmed by the next bar not going further) -> stop to
+        +lock_r. Stops only ever move toward profit."""
+        be_at, lock_r = rules.get("breakeven_at_r"), rules.get("lock_r")
+        if be_at is None and lock_r is None:
+            return
+        sign = 1 if trade.side == "long" else -1
+        risk = abs(trade.entry - trade.stop)
+        ext = b.h if sign > 0 else b.l
+        best = (ext - trade.entry) * sign / risk                       # this bar's best, in R
+        cur = trade.stop_now if trade.stop_now is not None else trade.stop
+
+        def to(level: float, why: str):
+            if (level - cur) * sign > 0:
+                trade.stop_now, move["why"] = round(level, 2), why
+        if be_at is not None and best >= be_at:
+            to(trade.entry, "be_stop")
+        prev = move["prev_h"]
+        if lock_r is not None and prev is not None:
+            prev_best = (prev - trade.entry) * sign / risk
+            if prev_best > lock_r and (ext - prev) * sign <= 0:        # this bar didn't beat it: an internal high
+                to(trade.entry + sign * lock_r * risk, "lock_stop")
+        move["prev_h"] = ext
+
     for i in idx:
         b = bars5[i]
         # ---- manage an open trade on this bar (levels known before it: the previous bar's middle band)
         if trade is not None:
             mid = bb[i - 1][1] if bb[i - 1] else None
             long = trade.side == "long"
-            hit_stop = b.l <= trade.stop if long else b.h >= trade.stop
+            stop = trade.stop_now if trade.stop_now is not None else trade.stop
+            hit_stop = b.l <= stop if long else b.h >= stop
             if hit_stop:
-                gap = b.o < trade.stop if long else b.o > trade.stop
-                close_trade(b.o if gap else trade.stop, t(i), "stop")
+                gap = b.o < stop if long else b.o > stop
+                close_trade(b.o if gap else stop, t(i), move["why"])
             else:
                 tgt = [(trade.target_2r, "2R")]
                 if mid is not None and rules.get("middle_band", True):
@@ -261,6 +290,8 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
                         break
             if trade is not None and b.start + FIVE >= end:
                 close_trade(b.c, t(i), "session_end")
+            if trade is not None:
+                step_stop(b)                  # at this bar's close: move the stop for the next bar
             continue
 
         if bb[i] is None:
@@ -300,6 +331,7 @@ def run_session(bars5: list[Bar], day: date, s: dict) -> SessionResult:
                     continue
                 r15v, a15v = trend_at(bars5[pending_i].start + FIVE)
                 sign = 1 if side == "long" else -1
+                move.update(why="stop", prev_h=None)
                 trade = Trade(side, t(pending_i), t(i), round(entry, 2), stop,
                               round(entry + sign * rules["target_r"] * risk, 2), round(mid, 2), n,
                               round(r15v, 1), round(a15v, 1))

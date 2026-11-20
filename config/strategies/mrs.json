@@ -36,7 +36,9 @@
   "exit": {
     "target_r": 2.0,
     "middle_band": true,
-    "min_reward_r": 1.0
+    "min_reward_r": 1.0,
+    "breakeven_at_r": null,
+    "lock_r": null
   },
   "account": {
     "size_usd": 50000,

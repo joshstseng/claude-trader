@@ -120,6 +120,20 @@ class SessionTest(unittest.TestCase):
         self.assertLess(t.r, -1.0)                                    # 1R plus costs
         self.assertGreater(t.r, -1.3)
 
+    def test_break_even_then_lock_in_1r(self):
+        trail = copy.deepcopy(S)
+        trail["exit"].update(middle_band=False, breakeven_at_r=1.0, lock_r=1.0)
+        # risk is 6 points; entry at the 4:40 bar's close
+        be = mrs.run_session(series({**DIP, 9: 7.0, 10: -10.0}), D, trail).trades[0]   # +1.25R, then back
+        self.assertEqual((be.result, be.exit, be.stop_now), ("be_stop", be.entry, be.entry))
+        self.assertLess(be.r, 0)                                                        # just the costs
+        self.assertGreater(be.r, -0.25)                                                 # (6-pt stop: costs ~0.21R)
+        lock = mrs.run_session(series({**DIP, 9: 9.0, 10: -2.0, 11: -3.0}), D, trail).trades[0]
+        self.assertEqual((lock.result, lock.exit), ("lock_stop", lock.entry + 6.0))      # high at 1.58R held
+        self.assertGreater(lock.r, 0.75)                                                # +1R less ~0.21R costs
+        off = mrs.run_session(series({**DIP, 9: 7.0, 10: -10.0}), D, dict(S, exit=dict(S["exit"], middle_band=False)))
+        self.assertIsNone(off.trades[0].stop_now)                                       # baseline: never moves
+
     def test_chop_is_filtered_by_adx(self):
         r = mrs.run_session(series(DIP, chop=True), D, S)
         self.assertEqual(r.trades, [])
