@@ -103,6 +103,11 @@ def run(start: date, end: date, *, label: str, overrides=(), db_path: Path = DB,
     return Run8(run_id, label, md, m)
 
 
+def _clock(hhmm: str) -> str:
+    """'06:05' -> '6:05 AM'."""
+    return datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p")
+
+
 def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
     best = None
     for f in reports.glob("run-*.json"):
@@ -118,7 +123,8 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
     m = doc["headline"]
     period = f"{_day(doc['first_day'])} → {_day(doc['last_day'])}" if doc.get("first_day") else ""
     lines = [f"## 🧪 Mr. S · 8 AM retest · Backtest #{doc['run_id']} · {doc['label']}",
-             f"-# NY AM · 8:00 ET candle, breakouts from 6:00 AM PT · {period} · {m['days']} days"]
+             f"-# NY AM · 8:00 ET candle, breakouts from {_clock(doc['settings']['strategy']['window']['breakouts_from'])} "
+             f"PT · {period} · {m['days']} days"]
     if not m["trades"]:
         lines.append("No trades.")
     else:
