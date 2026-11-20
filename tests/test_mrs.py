@@ -296,5 +296,36 @@ class DukascopyTest(unittest.TestCase):
             self.assertEqual(len(dk.load_1m(date(2025, 6, 6), date(2025, 6, 8))), 2)
 
 
+class HistDataTest(unittest.TestCase):
+    def test_file_time_follows_european_daylight_saving(self):
+        from app.backtest import histdata as hd
+        utc = lambda x: datetime.fromtimestamp(hd.to_utc(x), mrs.ZoneInfo("UTC")).strftime("%m-%d %H:%M")
+        self.assertEqual(utc("20250115 180000"), "01-15 23:00")      # winter: UTC−5 (6 PM New York)
+        self.assertEqual(utc("20250715 180000"), "07-15 22:00")      # summer: UTC−4 (6 PM New York)
+        self.assertEqual(utc("20251028 170000"), "10-28 22:00")      # Europe already off DST, US not yet
+
+    def test_periods_and_fetch(self):
+        from app.backtest import histdata as hd
+        self.assertEqual(hd.periods(date(2024, 5, 1), date(2026, 3, 9), today=date(2026, 3, 10)),
+                         ["2024", "2025", "2026/01", "2026/02"])
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("DAT_ASCII_NSXUSD_M1_2023.csv", "20230102 180000;1.5;2;1;1.75;0\n20230102 180100;1.75;2;1.5;2;0\n")
+        posted = []
+
+        def http(url, data=None, referer=None):
+            if data is None:
+                return b'<input type="hidden" name="tk" id="tk" value="abc">'
+            posted.append(data)
+            return buf.getvalue()
+        rows = hd.fetch_period("2023", http=http)
+        self.assertEqual(posted[0]["tk"], "abc")
+        self.assertEqual(posted[0]["datemonth"], "2023")
+        self.assertEqual(rows[0][1:], [1.5, 2.0, 1.0, 1.75])
+        self.assertEqual(len(rows), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

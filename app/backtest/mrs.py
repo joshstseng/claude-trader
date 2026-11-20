@@ -2,7 +2,7 @@
 
     python -m app backtest --strategy mrs --from 2026-09-14 --to 2026-11-20 --label baseline
     python -m app backtest --strategy mrs --from … --to … --set filters.adx_min=25 --label "ADX 25"
-    python -m app backtest --strategy mrs --from 2021-11-01 --to … --set data_source=dukascopy --label …
+    python -m app backtest --strategy mrs --from 2021-01-01 --to … --set data_source=histdata --label …   (years)
 
 Data: Yahoo's NQ=F (front month) 5m bars. Yahoo only serves the last ~60 days, so every run adds what it
 fetches to a cache (data/bars/futures/), and history grows with each run. Older years: import later
@@ -171,10 +171,11 @@ def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_pat
     base = json.loads((paths.STRATEGY_CONFIG_DIR / "mrs.json").read_text())
     s, _, _ = apply_overrides(base, {}, list(overrides))
     source = s.get("data_source", "yahoo")
-    if bars is None and source == "dukascopy":
-        from app.backtest import dukascopy
-        bars = dukascopy.bars_5m(start - WARMUP - timedelta(days=1), end + timedelta(days=1), fetch=fetch,
-                                 progress=progress)
+    if bars is None and source in ("histdata", "dukascopy"):
+        import importlib
+        feed = importlib.import_module(f"app.backtest.{source}")
+        bars = feed.bars_5m(start - WARMUP - timedelta(days=1), end + timedelta(days=1), fetch=fetch,
+                            progress=progress)
     elif bars is None:
         bars = bars_for(s["data_symbol"], fetch=fetch, progress=progress)
     if not bars:
@@ -182,8 +183,9 @@ def run(start: date, end: date, *, label: str, overrides: list[str] = (), db_pat
     first = bars[0].start.astimezone(mrs.PT).date()
     sessions = run_sessions(bars, max(start, first), end, s)
     m = headline(sessions, s)
-    if source == "dukascopy":
-        from app.backtest.dukascopy import NOTE as note
+    if source in ("histdata", "dukascopy"):
+        import importlib
+        note = importlib.import_module(f"app.backtest.{source}").NOTE
     else:
         note = DATA_NOTE
     snapshot = {"strategy": s, "overrides": list(overrides), "data": note,
@@ -222,10 +224,15 @@ def _day(iso: str) -> str:
 
 
 def find_baseline(run_id: int, reports: Path = REPORTS) -> dict | None:
+    """The latest Mr. S run labeled 'baseline' on the same data (2 months of Yahoo isn't comparable to years)."""
     best = None
+    me = reports / f"run-{run_id}.json"
+    data = json.loads(me.read_text())["settings"].get("data") if me.exists() else None
     for f in reports.glob("run-*.json"):
         r = json.loads(f.read_text())
         sid = ((r.get("settings") or {}).get("strategy") or {}).get("id")
+        if data is not None and r["settings"].get("data") != data:
+            continue
         if sid == "mrs" and (r.get("label") or "").lower() == "baseline" and r["run_id"] != run_id:
             if best is None or r["run_id"] > best["run_id"]:
                 best = r
