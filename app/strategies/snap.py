@@ -70,7 +70,7 @@ def run_symbol(sym: str, bars: list, s: dict) -> list[SnapTrade]:
     i = 0
     while i < len(bars) - 1:
         why = signal(bars, i, s, cache)
-        if a[i] is None or why is None or (nxt and i + 2 >= len(bars)):
+        if a[i] is None or why is None or (nxt and i + 1 >= len(bars)):
             i += 1
             continue
         if nxt:
@@ -125,4 +125,39 @@ def run_symbol(sym: str, bars: list, s: dict) -> list[SnapTrade]:
                              round(px, 4), round(stop, 4), round(shares, 4), why, why_out, round(pnl, 2),
                              round(pnl / risk_usd, 3)))
         i = j + 1
+    return out
+
+
+def plan_next(bars_by_sym: dict, s: dict) -> list[dict]:
+    """What Snap does at the next open, from final daily bars (fills.mode next_open), replaying its own rules
+    from the start of the data so its open positions are the backtest's: one line per ETF.
+    action: "buy" (with an estimated size from today's close), "sell", "hold" (with its stop) or "none"."""
+    s2 = dict(s, fills={"mode": "next_open"})
+    out = []
+    for sym, bars in bars_by_sym.items():
+        trades = run_symbol(sym, bars, s2)
+        last = trades[-1] if trades else None
+        day = bars[-1].t.date().isoformat()
+        c = [b.c for b in bars]
+        if last and last.why_out == "end of data":                  # still holding
+            exit_ma = sma(c, s["exit"]["above_sma"])[-1]
+            held = sum(1 for b in bars if b.t.date().isoformat() >= last.day_in)
+            if (exit_ma is not None and c[-1] > exit_ma) or held - 1 >= s["exit"]["max_days"]:
+                out.append({"sym": sym, "action": "sell", "why": "close above the 5-day average"
+                            if exit_ma is not None and c[-1] > exit_ma else "time", "since": last.day_in,
+                            "shares": last.shares})
+            else:
+                out.append({"sym": sym, "action": "hold", "since": last.day_in, "entry": last.entry,
+                            "stop": last.stop, "shares": last.shares})
+            continue
+        why = signal(bars, len(bars) - 1, s)
+        a = atr(bars, s["stop"]["atr_period"])[-1]
+        if why and a:
+            dist = s["stop"]["atr_mult"] * a
+            acct = s["account"]
+            shares = min(acct["size_usd"] * acct["risk_pct"] / dist, acct["max_leverage"] * acct["size_usd"] / c[-1])
+            out.append({"sym": sym, "action": "buy", "why": why, "close": c[-1], "shares": int(shares),
+                        "stop_distance": round(dist, 2), "as_of": day})
+        else:
+            out.append({"sym": sym, "action": "none", "as_of": day})
     return out

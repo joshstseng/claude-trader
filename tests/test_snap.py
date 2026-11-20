@@ -71,6 +71,19 @@ class SnapTest(unittest.TestCase):
         out = next(i for i, b in enumerate(bars) if b.t.date().isoformat() == t.day_out)
         self.assertAlmostEqual(t.exit, bars[out].o * 0.9999, places=3)            # sold at an open too
 
+    def test_plan_next(self):
+        up = [100 + i * 0.5 for i in range(220)]
+        dip = series(up + [up[-1] - 4, up[-1] - 8])                 # today: a dip in an uptrend
+        flat = series(up)
+        plan = {x["sym"]: x for x in snap.plan_next({"QQQ": dip, "SPY": flat}, self.s)}
+        self.assertEqual(plan["QQQ"]["action"], "buy")
+        self.assertGreater(plan["QQQ"]["shares"], 0)
+        self.assertEqual(plan["SPY"]["action"], "none")
+        held = series(up + [up[-1] - 4, up[-1] - 8, up[-1] - 9])     # bought at today's open, still down
+        self.assertEqual(snap.plan_next({"QQQ": held}, self.s)[0]["action"], "hold")
+        back = series(up + [up[-1] - 4, up[-1] - 8, up[-1] - 9, up[-1] + 5])   # snapped back above the 5-day avg
+        self.assertEqual(snap.plan_next({"QQQ": back}, self.s)[0]["action"], "sell")
+
     def test_the_pass_bar(self):
         mk = lambda y, p: Trade("X", 1, datetime(y, 6, 1), datetime(y, 6, 2), 100, 100 + p, 1)   # noqa: E731
         good = [mk(y, p) for y in range(2021, 2027) for p in (30, 30, -10) * 6]

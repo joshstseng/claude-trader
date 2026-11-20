@@ -527,6 +527,29 @@ def cmd_backtest(a) -> int:
     return 0
 
 
+def cmd_snap_plan(a) -> int:
+    """Prints Snap's plan for the next open. Reads data only; places no orders."""
+    import json as _json
+    from datetime import date as _date
+    from app import paths, settings
+    from app.research import data
+    from app.strategies import snap
+    settings.load_env()
+    s = _json.loads((paths.STRATEGY_CONFIG_DIR / "snap.json").read_text())
+    bars = {sym: data.daily(sym, end=_date.today(), refresh=True) for sym in s["universe"]}
+    print(f"Snap plan for the next open (final bars through {max(b[-1].t.date() for b in bars.values())}):")
+    for x in snap.plan_next(bars, s):
+        if x["action"] == "buy":
+            print(f"  BUY  {x['sym']:4} ~{x['shares']} sh at the open ({x['why']}; stop {x['stop_distance']} below the fill)")
+        elif x["action"] == "sell":
+            print(f"  SELL {x['sym']:4} {x['shares']:.0f} sh at the open ({x['why']}; held since {x['since']})")
+        elif x["action"] == "hold":
+            print(f"  HOLD {x['sym']:4} {x['shares']:.0f} sh since {x['since']} · entry {x['entry']:.2f} · stop {x['stop']:.2f}")
+        else:
+            print(f"  —    {x['sym']:4} nothing to do")
+    return 0
+
+
 def cmd_backtest_post(a) -> int:
     from app.backtest import post
     if not post.post(a.run):
@@ -571,7 +594,10 @@ def main(argv=None) -> int:
     bp = sub.add_parser("backtest-post", help="(re)post a backtest run's summary to #backtests")
     bp.add_argument("--run", type=int, required=True)
     sub.add_parser("check", help="Alpaca + Discord connection check")
+    sub.add_parser("snap-plan", help="Snap (backtest only): what it would do at the next open, from today's final bars")
     a = p.parse_args(argv)
+    if a.cmd == "snap-plan":
+        return cmd_snap_plan(a)
     if a.cmd == "backtest-post":
         return cmd_backtest_post(a)
     if a.cmd == "backtest":

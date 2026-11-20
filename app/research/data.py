@@ -30,9 +30,12 @@ def _client():
     return c()
 
 
-def daily(sym: str, start: date = date(2016, 1, 1), end: date = date(2026, 11, 19), fetch: bool = True) -> list[D]:
-    """Daily bars, split- and dividend-adjusted (total return), SIP."""
+def daily(sym: str, start: date = date(2016, 1, 1), end: date = date(2026, 11, 19), fetch: bool = True,
+          refresh: bool = False) -> list[D]:
+    """Daily bars, split- and dividend-adjusted (total return), SIP. refresh: fetch again through `end`."""
     f = LAB / "1d" / f"{sym}.json.gz"
+    if refresh and fetch and f.exists():
+        f.rename(f.with_name(f.name + ".old"))         # put back if the fetch fails
     if not f.exists():
         if not fetch:
             return []
@@ -41,13 +44,21 @@ def daily(sym: str, start: date = date(2016, 1, 1), end: date = date(2026, 11, 1
         from alpaca.data.timeframe import TimeFrame
         req = StockBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Day,
                                start=datetime.combine(start, dtime(0), tzinfo=NY),
-                               end=datetime.combine(end, dtime(23, 59), tzinfo=NY),
+                               end=min(datetime.combine(end, dtime(23, 59), tzinfo=NY),
+                                       datetime.now(timezone.utc) - timedelta(minutes=20)),   # free plan: 15 min delay
                                feed=DataFeed.SIP, adjustment=Adjustment.ALL)
-        bars = _client().get_stock_bars(req).data.get(sym, [])
+        try:
+            bars = _client().get_stock_bars(req).data.get(sym, [])
+        except Exception:
+            old = f.with_name(f.name + ".old")
+            if old.exists():
+                old.rename(f)
+            raise
         rows = [[b.timestamp.astimezone(NY).date().isoformat(), b.open, b.high, b.low, b.close, b.volume] for b in bars]
         f.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(f, "wt") as fh:
             json.dump(rows, fh)
+        f.with_name(f.name + ".old").unlink(missing_ok=True)
     with gzip.open(f, "rt") as fh:
         rows = json.load(fh)
     return [D(datetime.combine(date.fromisoformat(r[0]), dtime(0), tzinfo=NY), *r[1:6]) for r in rows]
