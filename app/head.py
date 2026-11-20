@@ -13,6 +13,10 @@ What it does:
     /resume-all     lifts it (a bot's own /pause stays as it was)
     /flatten-all    global pause + a "flatten" command in the shared database; each bot closes its own
                     account with its own keys and answers; the head reports who did what
+    #live-trades    while no bot has a trade open, one light "no live trades" message (a new line each
+                    time); deleted within seconds of a trade starting, back when it ends
+    #closed-trades  after the daily summary, an "unping" command: each bot takes the @mention off its own
+                    closed-trade cards for that day (Discord lets a bot edit only its own messages)
 
 The head has no broker keys, and trading never waits on it: if it's down, every bot carries on
 (trades stay protected at Alpaca and are still sold at 3:55). The bots watch its heartbeat in turn.
@@ -21,8 +25,10 @@ The head has no broker keys, and trading never waits on it: if it's down, every 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import random
 import signal
 import time
 from dataclasses import dataclass
@@ -53,6 +59,7 @@ class HeadSettings:
     owner_id: int
     channel_system: int
     channel_daily_summary: int
+    channel_live_trades: int | None = None    # optional: the "no live trades" message
 
 
 def head_settings() -> HeadSettings:
@@ -65,7 +72,9 @@ def head_settings() -> HeadSettings:
     return HeadSettings(bot_token=token, guild_id=settings._require_int("DISCORD_GUILD_ID"),
                         owner_id=settings._require_int("DISCORD_OWNER_ID"),
                         channel_system=settings._require_int("DISCORD_CHANNEL_SYSTEM"),
-                        channel_daily_summary=settings._require_int("DISCORD_CHANNEL_DAILY_SUMMARY"))
+                        channel_daily_summary=settings._require_int("DISCORD_CHANNEL_DAILY_SUMMARY"),
+                        channel_live_trades=(settings._require_int("DISCORD_CHANNEL_LIVE_TRADES")
+                                             if os.environ.get("DISCORD_CHANNEL_LIVE_TRADES", "").strip() else None))
 
 
 # ------------------------------------------------------------------------ helpers
@@ -365,6 +374,70 @@ def flatten_report(acks: list, expected: list[str]) -> str:
 
 # ------------------------------------------------------------------------ the Discord bot
 
+# ------------------------------------------------------------------ #live-trades when it's quiet
+
+IDLE_EVERY_S = 5
+IDLE_LINES: dict[str, tuple[str, list[str]]] = {
+    "day_off": ("🛋️", [
+        "Market's closed. The bots are recharging for next week's hunt.",
+        "Day off. Even the best traders sharpen the axe before swinging it.",
+        "No market today. The bots are studying the tape and dreaming of breakouts.",
+        "Weekend mode. Rest now, compound later.",
+        "Closed for the day. The next setup is already out there, waiting.",
+        "Off day. The bots are doing push-ups and reviewing their stops.",
+        "No trading today. Big things start with quiet days like this.",
+        "Market's asleep. The bots are polishing their entries for the next open.",
+    ]),
+    "premarket": ("☕", [
+        "Pre-market. Coffee's brewing, charts are loading, the bots are stretching.",
+        "Not open yet. The bots are lacing up for the opening bell.",
+        "Early hours. Watchlists are warming up and the bots are hungry.",
+        "Pre-market quiet. Every great day starts flat.",
+        "Calm before the bell. The bots have their game faces on.",
+        "Waiting on the open. Somewhere out there is today's best setup.",
+        "Pre-market. Stops are set, rules are loaded, nerves are steel.",
+        "Not open yet. The bots are reading the room before they walk in.",
+    ]),
+    "market": ("🔭", [
+        "We're chilling, no trades right now. The bots are scouring the market for setups.",
+        "No live trades. The bots are out hunting, patient and picky.",
+        "Flat and focused. Waiting for a setup worth the risk.",
+        "Nothing live. The best trade is sometimes the one you wait for.",
+        "Scanning the market. No setup, no trade, no problem.",
+        "No position, no stress. The bots have binoculars out.",
+        "All quiet on the trading floor. The bots are watching every tick.",
+        "Cash is a position too. The bots are waiting for their pitch.",
+        "No trades right now. The bots are sniffing out the next breakout.",
+        "Patience mode. The market pays the ones who wait for their spot.",
+    ]),
+    "closed": ("🌙", [
+        "Market's closed. Every bot is flat, rested and ready for tomorrow.",
+        "Done for the day. The bots are reviewing the tape and plotting tomorrow.",
+        "Closing bell rang. Flat, safe and hungry for the next session.",
+        "After hours. The bots are cooling down and the stops are all cleared.",
+        "Day's done. Tomorrow's setups are already forming.",
+        "Market's closed. The bots are counting lessons, not just dollars.",
+        "Lights out on the trading floor. See you at the bell.",
+        "All flat for the night. Big swings start with a good night's rest.",
+    ]),
+}
+
+
+def idle_phase(now: datetime, session: market.Session | None) -> str:
+    """day_off (weekend, holiday), premarket, market (open), closed (after the close)."""
+    if session is None:
+        return "day_off"
+    t = now.astimezone(NY).time()
+    return "premarket" if t < session.open else "market" if t < session.close else "closed"
+
+
+def idle_text(phase: str, last: str | None = None, rng: random.Random | None = None) -> tuple[str, str]:
+    """(message, line): a line from the phase's list, never the one shown last."""
+    emoji, lines = IDLE_LINES[phase]
+    line = (rng or random).choice([x for x in lines if x != last] or lines)
+    return f"{emoji} **No live trades.** {line}\n-# This clears the moment a trade goes live.", line
+
+
 def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
     import discord
     from discord import app_commands
@@ -378,6 +451,7 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
             self.watchdog = Watchdog(exclude={HEAD})
             self.started = datetime.now(timezone.utc)
             self._last_error_post = 0.0
+            self._idle_msg = None          # the "no live trades" message in #live-trades
             self._add_commands()
 
         async def setup_hook(self) -> None:
@@ -444,6 +518,8 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 text, details = plan
                 await self.post_summary(text, details, day)
                 await asyncio.to_thread(self.log.set_fleet, f"head_summary:{day}", "posted")
+                # each bot takes the @mention off its own closed-trade cards for the day
+                await asyncio.to_thread(self.log.add_command, "unping", HEAD, day)
                 posted = True
             return posted
 
@@ -495,6 +571,71 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 except Exception:  # noqa: BLE001 - keep watching
                     log.exception("head bot tick failed")
                 await asyncio.sleep(60)
+
+        # ---- #live-trades when no trade is open
+
+        async def idle_channel(self):
+            ch = self.get_channel(cfg.channel_live_trades)
+            return ch if ch is not None else await self.fetch_channel(cfg.channel_live_trades)
+
+        async def idle_check(self, now: datetime) -> str | None:
+            """Keep one "no live trades" message in #live-trades while no bot has an order open; delete it
+            as soon as one does. Returns what it did (posted, edited, deleted) or None."""
+            if not cfg.channel_live_trades:
+                return None
+            if await asyncio.to_thread(self.log.fleet, "head_instance") not in (None, INSTANCE):
+                return None                                    # a newer copy of the head owns the message
+            busy = bool(await asyncio.to_thread(self.log.open_orders))
+            state = json.loads(await asyncio.to_thread(self.log.fleet, "head_idle") or "{}")
+            ch = await self.idle_channel()
+            if self._idle_msg is None and state.get("msg"):    # after a restart: pick the message back up
+                try:
+                    self._idle_msg = await ch.fetch_message(int(state["msg"]))
+                except discord.NotFound:
+                    state = {}
+            if busy:
+                if self._idle_msg is None and not state:
+                    return None
+                if self._idle_msg is not None:
+                    try:
+                        await self._idle_msg.delete()
+                    except discord.NotFound:
+                        pass
+                self._idle_msg = None
+                await asyncio.to_thread(self.log.set_fleet, "head_idle", None)
+                return "deleted"
+            phase = idle_phase(now, self.session(now))
+            if self._idle_msg is not None and state.get("phase") == phase:
+                return None
+            text, line = idle_text(phase, state.get("line"))
+            did = None
+            if self._idle_msg is not None:
+                try:
+                    await self._idle_msg.edit(content=text)
+                    did = "edited"
+                except discord.NotFound:                       # someone deleted it: post a new one
+                    pass
+            if did is None:
+                self._idle_msg, did = await ch.send(text, silent=True), "posted"
+            await asyncio.to_thread(self.log.set_fleet, "head_idle",
+                                    json.dumps({"msg": str(self._idle_msg.id), "phase": phase, "line": line}))
+            return did
+
+        async def idle_loop(self) -> None:
+            await self.ready.wait()
+            warned = False
+            while True:
+                try:
+                    await self.idle_check(datetime.now(timezone.utc))
+                except discord.Forbidden as e:
+                    if not warned:
+                        warned = True
+                        await self.post(cfg.channel_system, "⚠️ Can't post the \"no live trades\" message: the head "
+                                        "bot needs **View Channel**, **Send Messages** and **Read Message History** "
+                                        f"in #live-trades ({str(e)[:100]}).")
+                except Exception:  # noqa: BLE001 - keep going
+                    log.warning("live-trades idle message failed", exc_info=True)
+                await asyncio.sleep(IDLE_EVERY_S)
 
         # ---- slash commands (owner only)
 
@@ -599,6 +740,7 @@ async def _live(cfg: HeadSettings, trade_log: tradelog.TradeLog) -> None:
                        + (", ".join(bot_name(b) for b in bots) or "no bots yet")
                        + (" · ⏸️ global pause is **on**" if await asyncio.to_thread(trade_log.global_pause) else ""))
         loop_task = asyncio.create_task(bot.run_loop())
+        idle_task = asyncio.create_task(bot.idle_loop())
         try:
             await bot_task
         except asyncio.CancelledError:
@@ -613,6 +755,7 @@ async def _live(cfg: HeadSettings, trade_log: tradelog.TradeLog) -> None:
                 pass
         finally:
             loop_task.cancel()
+            idle_task.cancel()
 
 
 def run() -> int:

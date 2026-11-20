@@ -19,6 +19,7 @@ A separate Discord application ("Uri"), added to the server with **bot** + **app
    DISCORD_OWNER_ID=<same as the ORB service>
    DISCORD_CHANNEL_SYSTEM=<same as the ORB service>
    DISCORD_CHANNEL_DAILY_SUMMARY=<same as the ORB service>
+   DISCORD_CHANNEL_LIVE_TRADES=<same as the ORB service>
    ```
    (`${{Postgres.DATABASE_URL}}` links the existing database; if your database service has another name, use that name. **Don't** add Alpaca keys or the ORB bot's `DISCORD_BOT_TOKEN`)
 4. Optional: **Settings** → rename the service to `head-bot`
@@ -31,6 +32,8 @@ A separate Discord application ("Uri"), added to the server with **bot** + **app
 |---|---|
 | Watchdog | Each bot writes a heartbeat every minute. A bot silent **3+ minutes** between 9:00 AM ET and 20 min after the close → @mention in `#system`; "✅ back" when it returns. The trading bots watch the head too (5 min, market hours, no effect on trading) |
 | Daily summary | **The only poster in `#daily-summary`** (since 2026-11-20). Each bot hands its full 4:15 summary to the shared database instead of posting it; once every bot has reported (or at 5:00 PM ET, naming any that didn't) the head posts **one message**: one line per bot plus a fleet total once there are 2+ bots, and a **thread** under it with each bot's full summary (every signal, paper trades, costs, data check). Missed while the head was down → posted when it's back. If a bot can't reach the database, it posts its own summary so it's never lost. Needs the head's role to have **Create Public Threads** and **Send Messages in Threads** |
+| `#live-trades` when it's quiet | *(added 2026-11-20; needs `DISCORD_CHANNEL_LIVE_TRADES` on the head service)* While no bot has an order open, one light "**No live trades.**" message with a new line each time, matched to the time of day (☕ pre-market, 🔭 market open, 🌙 after the close, 🛋️ days off). Deleted within ~5 s of an order going in, a fresh one once the trade is over. Sent silently (no notification). Needs Uri to have **View Channel**, **Send Messages** and **Read Message History** in `#live-trades`; if not, one ⚠️ in `#system` |
+| `#closed-trades` @mentions | *(added 2026-11-20)* After the daily summary posts, the head sends an `unping` command; each bot takes the @mention off **its own** closed-trade cards for that day (Discord lets a bot edit only its own messages). You still get pinged as each trade closes; by evening the channel has no pings left |
 | `/status [bot]` | `all` (the default): every bot alive, paused, today's numbers, open trades and **money at risk across bots**. A bot's Discord name (autocompletes, e.g. `/status Orbi`, `/status Uri`): that bot's own status, as it last reported it (≤1 min old), or what the head itself is doing. Only you see the answer |
 | `/pause-all` · `/resume-all` | The shared global pause: no alerts or orders from any bot. A bot's own `/pause` is separate and stays as it was |
 | `/flatten-all confirm:yes` | Global pause on, then every live bot closes its own account with its own keys (within ~5 s) and answers; the head lists who did what. A bot that doesn't answer in 60 s is named so you can use its own `/flatten` |

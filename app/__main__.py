@@ -212,14 +212,20 @@ async def fleet_commands(bot, every_s: float = 5.0, trade_log=None) -> None:
     while True:
         try:
             for c in await asyncio.to_thread(db.pending_commands, me):
-                result = await run_fleet_command(bot, c["command"])
+                result = await run_fleet_command(bot, c["command"], c["note"])
                 await asyncio.to_thread(db.ack_command, c["id"], me, result)
         except Exception:  # noqa: BLE001
             logging.getLogger("app").warning("fleet command check failed", exc_info=True)
         await asyncio.sleep(every_s)
 
 
-async def run_fleet_command(bot, command: str) -> str:
+async def run_fleet_command(bot, command: str, note: str | None = None) -> str:
+    if command == "unping":                 # after the daily summary: no @mentions left on the day's cards
+        cards = getattr(bot, "cards", None)
+        if cards is None or not note:
+            return "no closed-trade cards"
+        n = await cards.unping(note)
+        return f"took the @mention off {n} card{'' if n == 1 else 's'}"
     if command != "flatten":
         return f"unknown command {command!r}, ignored"
     if bot.flattener is None:

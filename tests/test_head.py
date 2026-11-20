@@ -392,6 +392,135 @@ class StatusTest(unittest.TestCase):
         self.assertIn("No bot called **zed**. Try: all, Uri, Orbi", bot.status_for("zed"))
 
 
+class FakeMsg:
+    _n = 0
+
+    def __init__(self, content):
+        FakeMsg._n += 1
+        self.id, self.content, self.deleted, self.edits = FakeMsg._n, content, False, 0
+
+    async def edit(self, content=None, **kw):
+        self.content, self.edits = content, self.edits + 1
+
+    async def delete(self):
+        self.deleted = True
+
+
+class FakeChannel:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, text, **kw):
+        self.silent = kw.get("silent")
+        self.sent.append(FakeMsg(text))
+        return self.sent[-1]
+
+    async def fetch_message(self, mid):
+        return next(m for m in self.sent if m.id == mid)
+
+
+class IdleMessageTest(unittest.TestCase):
+    def test_phases_and_lines_never_repeat(self):
+        self.assertEqual(head.idle_phase(et(8, 0), SESSION), "premarket")
+        self.assertEqual(head.idle_phase(et(10, 0), SESSION), "market")
+        self.assertEqual(head.idle_phase(et(16, 30), SESSION), "closed")
+        self.assertEqual(head.idle_phase(et(10, 0), None), "day_off")
+        last = None
+        for _ in range(30):
+            text, line = head.idle_text("market", last)
+            self.assertNotEqual(line, last)
+            self.assertIn("No live trades", text)
+            last = line
+
+    def test_posted_when_quiet_deleted_when_a_trade_starts(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            ch = FakeChannel()
+
+            async def go():
+                bot = head.make_head_bot(head.HeadSettings("x", 1, 2, 3, 4, channel_live_trades=5), log,
+                                         market.SkillCalendar())
+
+                async def idle_channel():
+                    return ch
+                bot.idle_channel = idle_channel
+                did = [await bot.idle_check(et(9, 0)), await bot.idle_check(et(9, 1))]
+                did.append(await bot.idle_check(et(10, 0)))          # the market opened: new line, same message
+                run = log.start_run("orb", "live", {}, date_from=DAY.isoformat(), date_to=DAY.isoformat())
+                log.db.execute("INSERT INTO signals (run_id, strategy, source, date, symbol, status, entry, stop,"
+                               " target, created_at) VALUES (?, 'orb', 'live', ?, 'TSLA', 'pass', 100, 98, 104, 'x')",
+                               (run, DAY.isoformat()))
+                sid = log.db.execute("SELECT max(id) FROM signals").fetchone()[0]
+                log.add_order(sid, "c1", "TSLA", 10, 100, 98, 104)
+                log.update_order("c1", status="submitted")
+                did += [await bot.idle_check(et(10, 5)), await bot.idle_check(et(10, 6))]
+                log.update_order("c1", status="closed")
+                did.append(await bot.idle_check(et(11, 0)))
+                return did
+            did = asyncio.run(go())
+            self.assertEqual(did, ["posted", None, "edited", "deleted", None, "posted"])
+            self.assertTrue(ch.sent[0].deleted)
+            self.assertIn("🔭", ch.sent[0].content)
+            self.assertTrue(ch.silent)
+            self.assertEqual(json.loads(log.fleet("head_idle"))["msg"], str(ch.sent[1].id))
+            log.close()
+
+    def test_an_older_copy_of_the_head_leaves_it_alone(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.set_fleet("head_instance", "newer-copy")
+            bot = head.make_head_bot(head.HeadSettings("x", 1, 2, 3, 4, channel_live_trades=5), log,
+                                     market.SkillCalendar())
+            self.assertIsNone(asyncio.run(bot.idle_check(et(10, 0))))
+            off = head.make_head_bot(head.HeadSettings("x", 1, 2, 3, 4), log, market.SkillCalendar())
+            self.assertIsNone(asyncio.run(off.idle_check(et(10, 0))))
+            log.close()
+
+
+class UnpingTest(unittest.TestCase):
+    def test_the_summary_asks_every_bot_to_unping_that_day(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            log.beat("orb")
+            log.save_report("orb", DAY.isoformat(), "x")
+            HeadBotTest().run_summary(log, [et(16, 30)])
+            cmds = log.pending_commands("orb")
+            self.assertEqual([(c["command"], c["note"]) for c in cmds], [("unping", DAY.isoformat())])
+            log.close()
+
+    def test_the_bot_takes_the_mention_off_its_own_cards(self):
+        from app.__main__ import run_fleet_command
+        from app.livecards import LiveCards
+        with tempfile.TemporaryDirectory() as d:
+            log = tradelog.TradeLog(Path(d) / "t.db")
+            ch = FakeChannel()
+            run = log.start_run("orb", "live", {}, date_from=DAY.isoformat(), date_to=DAY.isoformat())
+            for sym in ("TSLA", "AMD"):
+                log.db.execute("INSERT INTO signals (run_id, strategy, source, date, symbol, status, entry, stop,"
+                               " target, created_at) VALUES (?, 'orb', 'live', ?, ?, 'pass', 100, 98, 104, 'x')",
+                               (run, DAY.isoformat(), sym))
+                sid = log.db.execute("SELECT max(id) FROM signals").fetchone()[0]
+                msg = FakeMsg(f"<@2> ✅ **{sym}** target hit")
+                ch.sent.append(msg)
+                log.add_order(sid, sym, sym, 10, 100, 98, 104)
+                log.update_order(sym, status="closed", closed_card_message_id=str(msg.id))
+            bot = mock.Mock()
+            lc = LiveCards(bot, log, None, {}, live_channel=5, closed_channel=6)
+
+            async def channel(cid):
+                return ch
+            lc._channel = channel
+            bot.cards = lc
+            self.assertEqual(asyncio.run(run_fleet_command(bot, "unping", DAY.isoformat())),
+                             "took the @mention off 2 cards")
+            self.assertEqual([m.content for m in ch.sent], ["✅ **TSLA** target hit", "✅ **AMD** target hit"])
+            self.assertEqual(asyncio.run(run_fleet_command(bot, "unping", DAY.isoformat())),
+                             "took the @mention off 0 cards")
+            self.assertEqual(asyncio.run(run_fleet_command(FakeBot(None), "unping", DAY.isoformat())),
+                             "no closed-trade cards")
+            log.close()
+
+
 class SettingsTest(unittest.TestCase):
     def test_the_head_needs_its_own_discord_bot(self):
         env = {"DISCORD_BOT_TOKEN_HEAD": "same", "DISCORD_BOT_TOKEN": "same", "DISCORD_GUILD_ID": "1",

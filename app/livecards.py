@@ -4,7 +4,8 @@ Each paper trade gets ONE card in #live-trades from the moment you Approve:
     ⏳ waiting for fill   [Cancel order]
     🟢 in the trade       [Close now] [Break-even] [Move stop…] [Move target…]
 refreshed about every minute (silently) and right away on events. When it ends, the card is deleted
-and a final card is posted to #closed-trades with an @mention. Card message ids are saved in the
+and a final card is posted to #closed-trades with an @mention (taken off after the daily summary,
+when the head bot sends "unping", so the channel isn't a wall of pings). Card message ids are saved in the
 trade log, so a restart picks the cards back up.
 """
 
@@ -295,7 +296,8 @@ class LiveCards:
             await asyncio.sleep(every_s)
 
     async def refresh_closed(self, cid: str) -> None:
-        """Re-render a closed card (e.g. after its exit price was corrected), keeping the @mention."""
+        """Re-render a closed card (e.g. after its exit price was corrected); the @mention stays only if
+        it hasn't been taken off yet."""
         row = self.log.order(cid)
         if row is None or not row["closed_card_message_id"]:
             return
@@ -308,8 +310,29 @@ class LiveCards:
         head, body = cards.closed_card(row, sig, self.log.events(cid), self.log.outcome(row["signal_id"]))
         pnl = row["pnl_usd"] or 0
         color = COLOR["win"] if pnl > 0 else COLOR["loss"] if pnl < 0 else COLOR["flat"]
-        await msg.edit(content=f"<@{self.bot.cfg.owner_id}> {head}",
-                       embed=discord.Embed(description=body, color=color))
+        mention = f"<@{self.bot.cfg.owner_id}> " if (msg.content or "").lstrip().startswith("<@") else ""
+        await msg.edit(content=mention + head, embed=discord.Embed(description=body, color=color))
+
+    async def unping(self, day: str) -> int:
+        """Take the @mention off the day's closed cards (the head bot asks after the daily summary).
+        Editing never pings again. Returns how many cards changed."""
+        from app.discord_bot import MENTION_RE
+        rows = self.log.db.execute(
+            "SELECT o.* FROM orders o JOIN signals s ON s.id = o.signal_id WHERE s.date = ? AND s.strategy = ?"
+            " AND o.closed_card_message_id IS NOT NULL", (day, active_id())).fetchall()
+        if not rows:
+            return 0
+        ch = await self._channel(self.closed_channel)
+        n = 0
+        for row in rows:
+            try:
+                msg = await ch.fetch_message(int(row["closed_card_message_id"]))
+            except discord.NotFound:
+                continue
+            if MENTION_RE.match(msg.content or ""):
+                await msg.edit(content=MENTION_RE.sub("", msg.content, count=1))
+                n += 1
+        return n
 
     async def add_backtest_lines(self, day: str) -> None:
         """After the 4:15 step: each closed card gets 'Backtest said…'."""
