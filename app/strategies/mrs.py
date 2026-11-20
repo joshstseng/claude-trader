@@ -10,6 +10,9 @@ Version A, "trend pullback" (the default settings):
          everything flat at the session end
     risk 1% of the account per trade (whole contracts); the session stops at -2R or +3R net; one trade at a time
 
+AMD gate (accumulation.enabled): setups only count while the market is in accumulation (a tight 60-min
+box, see accumulation()); a breakout out of the box (manipulation) stops it until a new box forms.
+
 Version B, "range fade": filters.adx_min=-1, filters.adx_max=20, filters.use_rsi=false: only when ADX is
 under 20 (a range), fading either band, no RSI direction.
 
@@ -187,6 +190,39 @@ class SessionResult:
         return round(sum(t.pnl_usd or 0 for t in self.trades), 2)
 
 
+def accumulation(bars5: list[Bar], a: dict) -> list[dict | None] | None:
+    """AMD's accumulation phase, bar by bar (None when accumulation.enabled is off).
+
+    For bar i, from the bars BEFORE it: the box = the high and low of the last lookback_minutes (60), all
+    back-to-back 5m bars; ATR = the average true range of the 14 bars before i. Accumulation ("box") is on
+    when the box is no taller than max_height_atr × ATR (3×: normal movement over an hour is ~4–5×) and no
+    breakout happened inside the window. A bar closing more than breakout_atr × ATR (1×) outside the box
+    is a breakout ("broke_out": manipulation has started); a new box then has to form from the bars after it.
+    """
+    if not a.get("enabled"):
+        return None
+    n = a["lookback_minutes"] // 5
+    k, m, bo = a["max_height_atr"], a["atr_length"], a["breakout_atr"]
+    tr = [b.h - b.l if j == 0 else max(b.h - b.l, abs(b.h - bars5[j - 1].c), abs(b.l - bars5[j - 1].c))
+          for j, b in enumerate(bars5)]
+    out: list[dict | None] = [None] * len(bars5)
+    last_bo = -1
+    span = (n - 1) * FIVE
+    for j in range(max(n, m), len(bars5)):
+        w = bars5[j - n:j]
+        if w[-1].start - w[0].start != span or bars5[j].start - w[-1].start != FIVE:
+            continue                                      # a gap (the daily halt, missing data): no box
+        atr_v = sum(tr[j - m:j]) / m
+        hi, lo = max(b.h for b in w), min(b.l for b in w)
+        box = j - n > last_bo and atr_v > 0 and (hi - lo) <= k * atr_v
+        c = bars5[j].c
+        broke = box and (c > hi + bo * atr_v or c < lo - bo * atr_v)
+        if broke:
+            last_bo = j
+        out[j] = {"box": box, "hi": hi, "lo": lo, "atr": atr_v, "broke_out": broke}
+    return out
+
+
 def _round_tick(x: float, tick: float, down: bool) -> float:
     q = x / tick
     return round((math.floor(q + 1e-9) if down else math.ceil(q - 1e-9)) * tick, 10)
@@ -207,6 +243,7 @@ def run_session(bars5: list[Bar], day: date, s: dict, bars1: list[Bar] | None = 
     b_rsi, b_adx = resample(bars5, rsi_min), resample(bars5, adx_min)
     v_rsi = rsi([b.c for b in b_rsi], ind["rsi_length"])
     v_adx = adx(b_adx, ind["adx_length"])
+    accum = accumulation(bars5, s.get("accumulation") or {})
 
     def latest(bars, values, minutes, t_known):
         """The value on the latest COMPLETE bar as of t_known (never one still forming)."""
@@ -426,6 +463,14 @@ def run_session(bars5: list[Bar], day: date, s: dict, bars1: list[Bar] | None = 
         side = "long" if b.c < lower else "short" if b.c > upper else None
         if side is None:
             continue
+        if accum is not None:                                            # AMD: only inside accumulation
+            st = accum[i]
+            if st is None or not st["box"]:
+                res.skipped.append({"at": t(i), "side": side, "why": "not in accumulation"})
+                continue
+            if st["broke_out"]:
+                res.skipped.append({"at": t(i), "side": side, "why": "range broke out (manipulation)"})
+                continue
         r15v, a15v = trend_at(known)
         f = s["filters"]
         if r15v is None or a15v is None:

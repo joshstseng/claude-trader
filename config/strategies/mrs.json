@@ -29,6 +29,13 @@
     "adx_max": null,
     "use_rsi": true
   },
+  "accumulation": {
+    "enabled": false,
+    "lookback_minutes": 60,
+    "max_height_atr": 3.0,
+    "atr_length": 14,
+    "breakout_atr": 1.0
+  },
   "entry": {
     "timeframe": "5m",
     "max_wait_minutes": 10,

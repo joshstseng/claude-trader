@@ -149,6 +149,26 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(trend.trades, [])
         self.assertIn("(trending)", trend.skipped[0]["why"])
 
+    def test_amd_only_trades_inside_accumulation(self):
+        b = copy.deepcopy(S)
+        b["filters"].update(adx_min=-1, adx_max=None, use_rsi=False)
+        b["accumulation"]["enabled"] = True
+        b["entry"]["min_stop_points"] = 0.5
+        b["exit"]["min_reward_r"] = 0.5
+        box = mrs.accumulation(series(chop=True), b["accumulation"])[-30]
+        self.assertTrue(box["box"])                                       # quiet zigzag: a tight box
+        self.assertEqual((box["hi"] - box["lo"], box["atr"]), (2.5, 2.5))
+        inside = mrs.run_session(series({6: -4.0, 7: 1.0}, chop=True), D, b)     # a small poke: faded
+        self.assertEqual([t.side for t in inside.trades][:1], ["long"])
+        broke = mrs.run_session(series({6: -8.0, 7: 1.0}, chop=True), D, b)      # > 1 ATR out: manipulation
+        self.assertEqual(broke.trades, [])
+        self.assertEqual(broke.skipped[0]["why"], "range broke out (manipulation)")
+        self.assertIn("not in accumulation", [x["why"] for x in broke.skipped[1:]])   # no new box yet
+        trend = mrs.run_session(series(DIP), D, b)                               # trending: no box
+        self.assertEqual(trend.skipped[0]["why"], "not in accumulation")
+        off = mrs.accumulation(series(chop=True), S["accumulation"])
+        self.assertIsNone(off)                                                   # off by default
+
     def test_rsi_must_agree(self):
         strict = copy.deepcopy(S)
         strict["filters"]["rsi_long_above"] = 101
