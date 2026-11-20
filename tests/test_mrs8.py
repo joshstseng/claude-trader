@@ -93,6 +93,14 @@ class DayTest(unittest.TestCase):
         trend["trend_filter"] = "1h"
         self.assertTrue(mrs8.run_day(bars, D, trend).why.startswith(("against the 1h trend", "limit not filled")))
 
+    def test_worst_case_stop_is_the_8am_candle(self):
+        flat = [Bar(T0 + i * mrs8.FIFTEEN, 100, 100.5, 99.5, 100) for i in range(40)]   # no structure at all
+        t = T0 + 40 * mrs8.FIFTEEN
+        self.assertEqual(mrs8.find_stop(True, 100, 90, 110, flat, flat, t, self.s), (90, "8:00 candle"))
+        self.assertEqual(mrs8.find_stop(False, 100, 90, 110, flat, flat, t, self.s), (110, "8:00 candle"))
+        self.assertIsNone(mrs8.find_stop(True, 100, 98, 102, flat, flat, t, self.s)[0])   # 2 pts: under 5 min
+        self.assertEqual(mrs8.find_stop(True, 100, 90, 110, [], [], T0, self.s), (None, "not enough 15m history"))
+
     def test_no_breakout(self):
         bars = day_bars({"05:00": (19900, 19905), "05:05": (19900, 20100), "05:10": (19950, 20000)})
         self.assertEqual(mrs8.run_day(bars, D, self.s).why, "no breakout by 8:00")

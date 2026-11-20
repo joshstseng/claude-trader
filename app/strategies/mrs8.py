@@ -7,7 +7,8 @@
                (a backtest fill needs price to trade through the midpoint by a tick)
     stop       (long; a short mirrors it) in this order: the nearest 15m swing low below the reference candle
                that still holds; if that's too far (> max_stop_atr × the 15m ATR), the nearest holding 15m
-               order block, then 15m FVG, then 5m FVG, then 5m order block; 2 ticks beyond the level
+               order block, then 15m FVG, then 5m FVG, then 5m order block; worst case the 8:00 candle's
+               far side (its low for a long); 2 ticks beyond the level
     target     the most recent 5m lower high (higher low for a short) when it's 2–3R away, otherwise 2R
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
                last 1h break of structure; breakouts against it are skipped
@@ -161,7 +162,11 @@ def find_stop(long: bool, entry: float, ref_lo: float, ref_hi: float, b15: list[
         r = got()
         if r:
             return r
-    return None, "no swing, order block or FVG within reach"
+    # worst case (your rule, 2026-11-20): the far side of the 8:00 ET candle itself
+    level = ref_lo if long else ref_hi
+    if ((entry - level) if long else (level - entry)) >= st["min_stop_points"]:
+        return level, "8:00 candle"
+    return None, "no swing, order block or FVG, and the 8:00 candle is too small"
 
 
 def find_target(long: bool, entry: float, risk: float, b5: list[Bar], t: datetime, s: dict) -> tuple[float, str]:
