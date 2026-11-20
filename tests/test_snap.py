@@ -60,6 +60,17 @@ class SnapTest(unittest.TestCase):
         self.assertLess(t.exit, t.stop)                    # filled at the gap's open, below the stop
         self.assertLess(t.r, -1.0)
 
+    def test_next_open_mode_buys_and_sells_at_the_next_open(self):
+        closes = [100 + i * 0.5 for i in range(220)]
+        closes += [closes[-1] - 4, closes[-1] - 8, closes[-1] + 6, closes[-1] + 8, closes[-1] + 9]
+        bars = series(closes)
+        self.s["fills"] = {"mode": "next_open"}
+        t = snap.run_symbol("QQQ", bars, self.s)[0]
+        signal_day = next(i for i, b in enumerate(bars) if b.t.date().isoformat() > t.day_in) - 1
+        self.assertAlmostEqual(t.entry, bars[signal_day].o * 1.0001, places=3)    # the next day's open
+        out = next(i for i, b in enumerate(bars) if b.t.date().isoformat() == t.day_out)
+        self.assertAlmostEqual(t.exit, bars[out].o * 0.9999, places=3)            # sold at an open too
+
     def test_the_pass_bar(self):
         mk = lambda y, p: Trade("X", 1, datetime(y, 6, 1), datetime(y, 6, 2), 100, 100 + p, 1)   # noqa: E731
         good = [mk(y, p) for y in range(2021, 2027) for p in (30, 30, -10) * 6]

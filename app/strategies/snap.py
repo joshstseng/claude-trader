@@ -9,6 +9,8 @@ the bell). Found by the research lab on 2026-11-20 (plans/snap-strategy.md); bac
     stop       3 × ATR(14) below the entry, checked on each day's low (a gap below it fills at the open)
     size       so the stop loses 1% of the account; at most 2× the account in one position
     one position per ETF at a time; re-entry allowed the day after an exit
+    fills.mode "next_open" (the live plan, plans/snap-paper.md): decide after the close on final bars, buy and
+    sell at the next open (market-on-open orders); the stop rests as a GTC order from the entry day on
 """
 
 from __future__ import annotations
@@ -64,11 +66,41 @@ def run_symbol(sym: str, bars: list, s: dict) -> list[SnapTrade]:
     slip = s["costs"]["slippage_bp"] / 1e4
     risk_usd = acct["size_usd"] * acct["risk_pct"]
     out: list[SnapTrade] = []
+    nxt = (s.get("fills") or {}).get("mode") == "next_open"
     i = 0
     while i < len(bars) - 1:
         why = signal(bars, i, s, cache)
-        if a[i] is None or why is None:
+        if a[i] is None or why is None or (nxt and i + 2 >= len(bars)):
             i += 1
+            continue
+        if nxt:
+            k = i + 1                                    # bought at the next open
+            entry = bars[k].o * (1 + slip)
+            dist = st["atr_mult"] * a[i]
+            stop = entry - dist
+            shares = min(risk_usd / dist, acct["max_leverage"] * acct["size_usd"] / entry)
+            j = k
+            while True:
+                x = bars[j]
+                if x.l <= stop:
+                    px, why_out = min(x.o, stop), "stop"
+                    break
+                done = exit_ma[j] is not None and c[j] > exit_ma[j]
+                if (done or j - i >= ex["max_days"]) and j + 1 < len(bars):
+                    j += 1                               # decided at this close, sold at the next open
+                    px = bars[j].o
+                    why_out = f"close above the {ex['above_sma']}-day average" if done else "time"
+                    break
+                if j == len(bars) - 1:
+                    px, why_out = c[j], "end of data"
+                    break
+                j += 1
+            px *= (1 - slip)
+            pnl = (px - entry) * shares
+            out.append(SnapTrade(sym, bars[k].t.date().isoformat(), bars[j].t.date().isoformat(), round(entry, 4),
+                                 round(px, 4), round(stop, 4), round(shares, 4), why, why_out, round(pnl, 2),
+                                 round(pnl / risk_usd, 3)))
+            i = j                                        # can buy again at this day's close signal
             continue
         entry = c[i] * (1 + slip)
         dist = st["atr_mult"] * a[i]
