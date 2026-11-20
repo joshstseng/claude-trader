@@ -86,6 +86,17 @@ So the effect is general to equity index ETFs, not a fit to four tickers.
 
 Every neighbouring setting is profitable in every period. Real slippage on these ETFs is well under 1 bp.
 
+## Luck test
+Snap's 721 trades (run #74) were resampled 10,000 times:
+
+| | Result |
+|---|---|
+| Runs that end with a loss | **0%** |
+| Total profit, 5th percentile / median | **+$19.9k** / +$28.9k |
+| Worst drawdown, median / 95th / 99th percentile | −$2.4k / −$3.9k / −$4.9k |
+
+**The real drawdown is worse (−$5.2k)**, because losses cluster in time: all four ETFs fall together in a sell-off. Plan for a drawdown of **−$5k to −$8k** at 1% risk.
+
 ## Honest caveats
 - **The returns are modest:** about +$2.6k a year on $50k (around 5%) at 1% risk, and the stop is rarely hit. A larger risk per trade scales the profits and the drawdowns together.
 - **It tends to lose in bear years** (2018, 2022). The 200-day filter keeps it out of the worst of those.
