@@ -27,6 +27,8 @@
                4h, 1h and 15m each read by tf_bias (gaps decide, BOS/CISD confirm, trend_big_candles big
                candles), 2 of the 3 must agree with the breakout
     exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
+               (window.after_flat "trail_1m_body": instead of closing at `flat`, from then on the stop follows the
+               latest 1m candle's body low (high, short), only tightening; a hard close at window.hard_flat)
                optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R;
                exit.breakeven_level "5m"/"15m" (the user's way): instead once price takes the first internal
                high/low between entry and target (at least breakeven_level_min_r out); +1R if there's none
@@ -427,7 +429,7 @@ class Trade8:
     bias: str | None
     exit_at: str | None = None
     exit: float | None = None
-    result: str | None = None        # target / stop / be_stop / session_end
+    result: str | None = None        # target / stop / be_stop / trail_stop / session_end
     r: float | None = None
     pnl_usd: float | None = None
     cost_usd: float | None = None
@@ -473,7 +475,9 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
     out = Day8(day.isoformat())
     w = s["window"]
     ref_t, look_t, expire_t, flat_t = (_at(day, w[k]) for k in ("reference", "breakouts_from", "order_until", "flat"))
-    bars1 = [b for b in bars1 if b.start < flat_t]
+    trail = w.get("after_flat") == "trail_1m_body"   # from `flat` on: trail the stop instead of closing (2026-11-20)
+    end_t = _at(day, w.get("hard_flat", "13:00")) if trail else flat_t
+    bars1 = [b for b in bars1 if b.start < end_t]
     from app.backtest.dukascopy import to_5m
     b5 = to_5m([[int(b.start.timestamp()), b.o, b.h, b.l, b.c] for b in bars1])
     b15, h1 = resample(b5, 15), resample(b5, 60)
@@ -596,9 +600,14 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
             gap = (b.o > target) if long else (b.o < target)
             _close(tr, b.o if gap else target, at, "target", s)
             break
-        if b.start + ONE >= flat_t or j == len(bars1) - 1:
+        if b.start + ONE >= end_t or j == len(bars1) - 1:
             _close(tr, b.c, at, "session_end", s)
             break
+        if trail and b.start + ONE >= flat_t:    # 9:00 on: the stop follows the last 1m candle's body (never back)
+            lvl = min(b.o, b.c) if long else max(b.o, b.c)
+            if (lvl > cur) if long else (lvl < cur):
+                cur, why = lvl, "trail_stop"
+            continue
         if be_lvl is not None and why == "stop" and ((b.h > be_lvl) if long else (b.l < be_lvl)):
             cur, why = tr.entry, "be_stop"        # took the internal level -> stop to entry
         if be_r is not None and why == "stop":    # at this minute's close: +1R reached -> stop to entry
@@ -612,7 +621,7 @@ def run_day(bars1: list[Bar], day: date, s: dict, ath_before: float | None = Non
 def _close(tr: Trade8, price: float, at: str, why: str, s: dict) -> None:
     c, k = s["contract"], s["costs"]
     sign = 1 if tr.side == "long" else -1
-    slip = k["slippage_ticks"] * c["tick"] * c["point_value"] if why in ("stop", "be_stop", "session_end") else 0.0
+    slip = k["slippage_ticks"] * c["tick"] * c["point_value"] if why in ("stop", "be_stop", "trail_stop", "session_end") else 0.0
     cost = tr.contracts * (2 * k["commission_per_side"] + slip)            # a limit entry: no slippage
     tr.exit, tr.exit_at, tr.result = round(price, 2), at, why
     tr.cost_usd = round(cost, 2)

@@ -176,12 +176,12 @@ class UserRulesTest(unittest.TestCase):
         self.s["filters"] = {"ath_longs_only_pct": None, "accumulation_since": None}
 
     def test_defaults_are_the_baseline(self):
-        """Baseline run #52 = #49 (2026-11-20): rules 1–5 on, the user's 4h/1h/15m trend read."""
+        """Baseline run #57 = #55 (2026-11-20): rules 1–5, the 4h/1h/15m trend read, break-even at the 15m level else 2R."""
         self.assertEqual(S["entry"], {"midpoint": "body", "small_body_atr": 0.5, "cancel_if_target_first": True})
         self.assertEqual(S["filters"], {"ath_longs_only_pct": 0.5, "accumulation_since": "03:30"})
         self.assertEqual((S["target"]["mode"], S["trend_filter"], S["trend_big_candles"], S["trend_legs_back"]),
                          ("levels", "mtf", 0, 1))
-        self.assertEqual(S["exit"], {"breakeven_at_r": 1.0, "breakeven_level": None, "breakeven_level_min_r": 0.5})
+        self.assertEqual(S["exit"], {"breakeven_at_r": 2.0, "breakeven_level": "15m", "breakeven_level_min_r": 0.5})
 
     def test_body_midpoint_unless_small(self):
         ref = Bar(T0, 100, 130, 90, 110)                         # candle mid 110, body mid 105, body 10
@@ -239,6 +239,18 @@ class UserRulesTest(unittest.TestCase):
         self.assertEqual(bar.internal_level(True, 100, 10, 130, bars, bar.FIVE, t, min_r=1.5), 125)
         self.assertIsNone(bar.internal_level(True, 100, 10, 120, bars, bar.FIVE, t, min_r=1.5))  # 125 is past the target
         self.assertIsNone(bar.internal_level(True, 100, 10, 130, bars[:4], bar.FIVE, t))         # not confirmed yet
+
+    def test_trail_after_flat_instead_of_closing(self):
+        bars = day_bars(self.LONG)
+        self.s["target"].update(mode="flat", default_r=20)                    # a target it never reaches
+        self.s["window"]["flat"] = "06:30"
+        closed = bar.run_day(bars, D, self.s).trade
+        self.assertEqual((closed.result, closed.exit_at[11:16]), ("session_end", "06:29"))
+        self.s["window"].update(after_flat="trail_1m_body", hard_flat="08:00")
+        tr = bar.run_day(bars, D, self.s).trade
+        self.assertEqual(tr.result, "trail_stop")                             # the quiet chop takes out a body low
+        self.assertGreater(tr.exit_at[11:16], "06:29")
+        self.assertGreater(tr.r, 1.0)                                         # locked in the move
 
     def test_accumulation(self):
         bars = day_bars(self.LONG)

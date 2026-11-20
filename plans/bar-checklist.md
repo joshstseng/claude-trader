@@ -1,6 +1,6 @@
 # Brix: what we're adding from the user's discretion
 
-Rules taken from the user's own trading ([October journal](bar-journal/2026-10.md), [trades](bar-journal/2026-10-trades.csv)), ordered **easiest to hardest** to build. **Baseline is now run #52 (= #49: rules 1–5 + the user's 4h/1h/15m trend read, +0.078R a trade, set 2026-11-20).** Before that, #35. Each is tested **one at a time** against the baseline over the full 6 years, then kept or dropped.
+Rules taken from the user's own trading ([October journal](bar-journal/2026-10.md), [trades](bar-journal/2026-10-trades.csv)), ordered **easiest to hardest** to build. **Baseline is now run #57 (= #55: rules 1–5, the user's 4h/1h/15m trend read, break-even at the first 15m internal level else 2R; +0.092R a trade, +$15.7k; set 2026-11-20).** Before that #52 (= #49), and #35. Each is tested **one at a time** against the baseline over the full 6 years, then kept or dropped.
 
 October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9R on 17 with the trend filter off).
 
@@ -48,6 +48,7 @@ October for reference: the user made +11.2R on 14 trades, Brix +1.8R on 6 (+10.9
   - *To decide:* a testable definition of "stronger".
 
 ## Notes
+- **No 9:00 close (run #58):** from 9:00 the stop trails the latest 1m candle's body instead (`window.after_flat="trail_1m_body"`). +0.094R vs +0.092R: the trades still open at 9:00 (about 1 in 10, averaging +0.7R) get stopped out within minutes, so it's nearly the same as closing.
 - **The user's liquidity read (10/28):** the gaps said bull, but the bull run was ending and price needed to retrace to the stacked lows below; the user went bear. And 10/15 (a no-trade day): the end of a bear trend, no liquidity, lows or gaps below, accumulating. Not modelled yet.
 - **Stops (October check):** Brix's entries line up with the user's (same minute most days), but its stops are about twice as wide (median ~75 pts vs ~35), mostly 1h swings and 15m order blocks further out. Item 9 matters.
 - **Later idea (from the user):** when 2 timeframes agree and the third doesn't, we expect it to flip; look for a level that could flip it (a 15m FVG, the 8:00 candle).

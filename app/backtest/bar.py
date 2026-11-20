@@ -40,7 +40,7 @@ def run_days(bars1, start: date, end: date, s: dict) -> list[bar.Day8]:
     while day <= end:
         if day.weekday() < 5:
             lo = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) - HISTORY
-            hi = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) + timedelta(hours=10)
+            hi = datetime.combine(day, datetime.min.time(), tzinfo=bar.PT) + timedelta(hours=14)
             k = bisect_left(times, lo)
             chunk = bars1[k:bisect_left(times, hi)]
             if any(b.start.astimezone(bar.PT).date() == day for b in chunk):
@@ -148,7 +148,12 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
                   "",
                   f"**Exits** 🎯 {res.get('target', 0)} target · ❌ {res.get('stop', 0)} stop · "
                   + (f"⚖️ {res['be_stop']} break-even · " if res.get("be_stop") else "")
-                  + f"⏰ {res.get('session_end', 0)} at 9:00",
+                  + (f"🪜 {res['trail_stop']} trailed after {_clock(doc['settings']['strategy']['window']['flat'])} · "
+                     if res.get("trail_stop") else "")
+                  + f"⏰ {res.get('session_end', 0)} at "
+                  + _clock(doc['settings']['strategy']['window'].get('hard_flat', '13:00')
+                           if doc['settings']['strategy']['window'].get('after_flat') else
+                           doc['settings']['strategy']['window']['flat']),
                   f"**Sides** {m['longs']} long · {m['shorts']} short",
                   f"**Risk** ~{_usd(m['avg_risk_usd']).lstrip('+')} a trade · avg stop {m['avg_stop_pts']:.1f} pts · "
                   f"worst drawdown {_usd(m['max_dd_usd'])}",

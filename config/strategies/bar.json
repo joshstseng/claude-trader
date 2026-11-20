@@ -2,7 +2,7 @@
   "id": "bar",
   "name": "Break and Retest (NQ, NY AM)",
   "enabled": false,
-  "note": "Backtest only (app/strategies/bar.py). Times are Pacific. Defaults = the baseline (run #52 = #49, set 2026-11-20; before that #35).",
+  "note": "Backtest only (app/strategies/bar.py). Times are Pacific. Defaults = the baseline (run #57 = #55, set 2026-11-20; before that #52 = #49, #35).",
   "symbol": "MNQ",
   "data_source": "histdata",
   "window": {
@@ -10,7 +10,9 @@
     "reference": "05:00",
     "breakouts_from": "06:05",
     "order_until": "08:00",
-    "flat": "09:00"
+    "flat": "09:00",
+    "after_flat": null,
+    "hard_flat": "13:00"
   },
   "entry": {
     "midpoint": "body",
@@ -39,8 +41,8 @@
     "big_stop_atr": 2.0
   },
   "exit": {
-    "breakeven_at_r": 1.0,
-    "breakeven_level": null,
+    "breakeven_at_r": 2.0,
+    "breakeven_level": "15m",
     "breakeven_level_min_r": 0.5
   },
   "account": {
