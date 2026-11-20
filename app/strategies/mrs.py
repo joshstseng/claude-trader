@@ -1,6 +1,6 @@
 """Mr. S: Bollinger mean-reversion on NQ futures (MNQ), Asia session first. Plan: plans/mrs-strategy.md
 
-Version A, "trend pullback" (the one built so far):
+Version A, "trend pullback" (the default settings):
     1h   RSI(14) > 55 -> longs only, < 45 -> shorts only (indicators.rsi_minutes)
     15m  ADX(14) > 20 (trending) (indicators.adx_minutes)
     5m   a bar CLOSES outside the Bollinger Band (20, 2): below the lower band for a long, above the upper for a short
@@ -9,6 +9,9 @@ Version A, "trend pullback" (the one built so far):
     exit the middle band (moves each bar) or 2R, whichever comes first; the stop first if a bar hits both;
          everything flat at the session end
     risk 1% of the account per trade (whole contracts); the session stops at -2R or +3R net; one trade at a time
+
+Version B, "range fade": filters.adx_min=-1, filters.adx_max=20, filters.use_rsi=false: only when ADX is
+under 20 (a range), fading either band, no RSI direction.
 
 Everything here is pure: bars in, setups and trades out. The live bot (Discord, Tradovate) and the backtest
 scenarios come later. Times: bars are tagged by their START; a 5m bar's values are known at start + 5 min.
@@ -431,10 +434,15 @@ def run_session(bars5: list[Bar], day: date, s: dict, bars1: list[Bar] | None = 
         if a15v <= f["adx_min"]:
             res.skipped.append({"at": t(i), "side": side, "why": f"ADX {a15v:.1f} ≤ {f['adx_min']} (choppy)"})
             continue
-        if side == "long" and r15v <= f["rsi_long_above"]:
+        if f.get("adx_max") is not None and a15v >= f["adx_max"]:      # version B: only in a range
+            res.skipped.append({"at": t(i), "side": side, "why": f"ADX {a15v:.1f} ≥ {f['adx_max']} (trending)"})
+            continue
+        if not f.get("use_rsi", True):
+            pass                                                         # version B: fade either band
+        elif side == "long" and r15v <= f["rsi_long_above"]:
             res.skipped.append({"at": t(i), "side": side, "why": f"RSI {r15v:.1f} not > {f['rsi_long_above']}"})
             continue
-        if side == "short" and r15v >= f["rsi_short_below"]:
+        elif side == "short" and r15v >= f["rsi_short_below"]:
             res.skipped.append({"at": t(i), "side": side, "why": f"RSI {r15v:.1f} not < {f['rsi_short_below']}"})
             continue
         if use_1m:

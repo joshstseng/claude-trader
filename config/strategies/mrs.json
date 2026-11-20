@@ -25,7 +25,9 @@
   "filters": {
     "rsi_long_above": 55,
     "rsi_short_below": 45,
-    "adx_min": 20
+    "adx_min": 20,
+    "adx_max": null,
+    "use_rsi": true
   },
   "entry": {
     "timeframe": "5m",

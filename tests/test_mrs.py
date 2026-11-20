@@ -139,6 +139,16 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(r.trades, [])
         self.assertIn("ADX", r.skipped[0]["why"])
 
+    def test_version_b_fades_ranges_only(self):
+        b = copy.deepcopy(S)
+        b["filters"].update(adx_min=-1, adx_max=20, use_rsi=False, rsi_long_above=101)   # RSI ignored
+        chop = mrs.run_session(series({6: -20.0, 7: 8.0}, chop=True), D, b)
+        self.assertEqual(len(chop.trades), 1)                        # a range: faded
+        self.assertEqual(chop.trades[0].side, "long")
+        trend = mrs.run_session(series({6: -20.0, 7: 8.0}), D, b)   # a strong trend: skipped
+        self.assertEqual(trend.trades, [])
+        self.assertIn("(trending)", trend.skipped[0]["why"])
+
     def test_rsi_must_agree(self):
         strict = copy.deepcopy(S)
         strict["filters"]["rsi_long_above"] = 101
