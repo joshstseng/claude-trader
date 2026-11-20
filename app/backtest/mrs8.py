@@ -135,6 +135,8 @@ def summary(doc: dict, baseline: dict | None = None) -> str:
                   f"{m['win_rate'] * 100:.0f}% win",
                   "",
                   f"**Exits** 🎯 {res.get('target', 0)} target · ❌ {res.get('stop', 0)} stop · "
+                  + (f"⚖️ {res['be_stop']} break-even · " if res.get("be_stop") else "") +
+                  f"
                   f"⏰ {res.get('session_end', 0)} at 9:00",
                   f"**Sides** {m['longs']} long · {m['shorts']} short",
                   f"**Risk** ~{_usd(m['avg_risk_usd']).lstrip('+')} a trade · avg stop {m['avg_stop_pts']:.1f} pts · "

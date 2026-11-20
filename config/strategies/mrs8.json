@@ -25,6 +25,9 @@
     "level_max_r": 4.0,
     "default_r": 2.0
   },
+  "exit": {
+    "breakeven_at_r": null
+  },
   "account": {
     "size_usd": 50000,
     "risk_pct": 0.01,

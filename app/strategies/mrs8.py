@@ -15,7 +15,8 @@
                each within 4R; otherwise 2R. ("5m": the most recent 5m lower high 2–3R away, runs #27–#30)
     trend      optional (trend_filter "1h"): the 1h bias from the most recently respected 1h FVG, else the
                last 1h break of structure; breakouts against it are skipped
-    exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM
+    exit       stop or target minute by minute (the stop first if one minute touches both); flat at 9:00 AM;
+               optional break-even (exit.breakeven_at_r): the stop moves to entry once price reaches +1R
 
 Definitions (each counts only once it's confirmed, so a backtest never peeks):
     swing        a fractal: a high (low) above (below) the 2 bars on each side; confirmed when the 2nd bar after closes
@@ -245,7 +246,7 @@ class Trade8:
     bias: str | None
     exit_at: str | None = None
     exit: float | None = None
-    result: str | None = None        # target / stop / session_end
+    result: str | None = None        # target / stop / be_stop / session_end
     r: float | None = None
     pnl_usd: float | None = None
     cost_usd: float | None = None
@@ -319,7 +320,10 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
     if n < 1:
         out.why = f"stop too wide for 1% ({risk:.1f} pts)"
         return out
-    if s["target"].get("mode", "5m") == "1h":
+    mode = s["target"].get("mode", "5m")
+    if mode == "flat":
+        target, tsrc = entry + (1 if long else -1) * s["target"]["default_r"] * risk, f"{s['target']['default_r']:g}R"
+    elif mode == "1h":
         target, tsrc = find_target_1h(long, entry, risk, h1, placed, s)
     else:
         target, tsrc = find_target(long, entry, risk, b5, placed, s)
@@ -343,12 +347,14 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
     tr = Trade8(day.isoformat(), side, ref.h, ref.l, brk.start.astimezone(PT).isoformat(timespec="minutes"),
                 fb.start.astimezone(PT).isoformat(timespec="minutes"), round(fill, 2), stop, src, target, tsrc,
                 n, bias)
+    be_r = (s.get("exit") or {}).get("breakeven_at_r")
+    cur, why = stop, "stop"                       # the stop moves to entry once +be_r is reached (exit.breakeven_at_r)
     for j in range(fill_i, len(bars1)):
         b = bars1[j]
         at = b.start.astimezone(PT).isoformat(timespec="minutes")
-        if (b.l <= stop) if long else (b.h >= stop):
-            gap = (b.o < stop) if long else (b.o > stop)
-            _close(tr, b.o if gap and j > fill_i else stop, at, "stop", s)
+        if (b.l <= cur) if long else (b.h >= cur):
+            gap = (b.o < cur) if long else (b.o > cur)
+            _close(tr, b.o if gap and j > fill_i else cur, at, why, s)
             break
         if j > fill_i and ((b.h >= target) if long else (b.l <= target)):
             gap = (b.o > target) if long else (b.o < target)
@@ -357,6 +363,10 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
         if b.start + ONE >= flat_t or j == len(bars1) - 1:
             _close(tr, b.c, at, "session_end", s)
             break
+        if be_r is not None and why == "stop":    # at this minute's close: +1R reached -> stop to entry
+            best = (b.h - tr.entry) if long else (tr.entry - b.l)
+            if best >= be_r * risk:
+                cur, why = tr.entry, "be_stop"
     out.trade = tr
     return out
 
@@ -364,7 +374,7 @@ def run_day(bars1: list[Bar], day: date, s: dict) -> Day8:
 def _close(tr: Trade8, price: float, at: str, why: str, s: dict) -> None:
     c, k = s["contract"], s["costs"]
     sign = 1 if tr.side == "long" else -1
-    slip = k["slippage_ticks"] * c["tick"] * c["point_value"] if why in ("stop", "session_end") else 0.0
+    slip = k["slippage_ticks"] * c["tick"] * c["point_value"] if why in ("stop", "be_stop", "session_end") else 0.0
     cost = tr.contracts * (2 * k["commission_per_side"] + slip)            # a limit entry: no slippage
     tr.exit, tr.exit_at, tr.result = round(price, 2), at, why
     tr.cost_usd = round(cost, 2)

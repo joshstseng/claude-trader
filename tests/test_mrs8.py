@@ -116,6 +116,20 @@ class DayTest(unittest.TestCase):
         t = mrs8.run_day(bars, D, s).trade
         self.assertEqual(t.break_at[11:16], "06:05")                           # the 6:00 close doesn't count
 
+    def test_break_even_at_1r(self):
+        bars = day_bars({"04:00": (19970, 19972), "04:05": (19971, 19990), "04:10": (19989, 19998),
+                         "05:00": (19995, 19996), "05:05": (19995, 20004), "05:10": (19999, 20005),
+                         "06:00": (20004, 20015), "06:05": (20012, 20012), "06:10": (19999, 20003),
+                         "06:15": (20002, 20035), "06:20": (19960, 19962)})          # +1R, then through the stop
+        s = copy.deepcopy(self.s)
+        s["target"]["mode"] = "flat"
+        plain = mrs8.run_day(bars, D, s).trade
+        s["exit"] = {"breakeven_at_r": 1.0}
+        be = mrs8.run_day(bars, D, s).trade
+        self.assertEqual(plain.result, "stop")
+        self.assertEqual((be.result, be.exit), ("be_stop", be.entry))
+        self.assertGreater(be.r, plain.r)
+
     def test_no_breakout(self):
         bars = day_bars({"05:00": (19900, 19905), "05:05": (19900, 20100), "05:10": (19950, 20000)})
         self.assertEqual(mrs8.run_day(bars, D, self.s).why, "no breakout by 8:00")
