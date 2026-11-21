@@ -85,6 +85,24 @@ Written 2026-11-20. The user asked for "extremely crazy parameters" to see if an
 | Only when all 4 ETFs signal the same day | 253 | 2.35 | +$17.7k | −$3.4k |
 | Short rips below the 200-day average | 237 | 1.28 | +$4.3k | −$3.1k |
 
+## Is the trailing stop a lucky setting? (robustness)
+Snap's entry, with only the trailing stop as an exit:
+
+| Starting stop | Trail | Trades | PF | Profit | True drawdown | Years positive |
+|---|---|---|---|---|---|---|
+| 3 × ATR | 0.5 × ATR | 896 | 1.48 | +$21.4k | −$5.9k | 8/11 |
+| 3 × ATR | **1 × ATR** | 813 | 1.69 | +$37.4k | **−$3.7k** | 9/11 |
+| 3 × ATR | 1.5 × ATR | 679 | 1.51 | +$33.1k | −$5.7k | 10/11 |
+| 3 × ATR | 2 × ATR | 553 | 1.70 | +$44.4k | −$6.5k | 9/11 |
+| 3 × ATR | 3 × ATR | 331 | 1.96 | +$48.0k | −$7.9k | 9/11 |
+| 2 × ATR | **1 × ATR** | 820 | 1.71 | **+$57.6k** | −$5.9k | **10/11** |
+| 2 × ATR | 2 × ATR | 560 | 1.73 | +$69.3k | −$9.0k | 9/11 |
+| 2 × ATR | 3 × ATR | 363 | 1.89 | +$70.1k | −$12.7k | 10/11 |
+
+**Every trail from 0.5 to 3 × ATR is profitable in every period** (2016–20, 2021–23, 2024–26), so it isn't a lucky number.
+
+**1 × ATR is the sweet spot.** With a 2 × ATR starting stop (bigger positions for the same 1% risk), it makes **about twice Snap's profit (+$57.6k against +$29.0k) for about the same drawdown (−$5.9k against −$5.6k).**
+
 ## Worth verifying next
-1. **The 1 × ATR trailing stop instead of the 5-day-average exit.** It's the cleanest improvement: more profit, less drawdown. It would need paper trading, or new data, to confirm.
+1. **The 1 × ATR trailing stop instead of the 5-day-average exit,** ideally with a 2 × ATR starting stop. It's the cleanest improvement: more profit at about the same drawdown, and robust to the trail distance. It would need paper trading, or new data, to confirm.
 2. **A 2R or 3R target** as a "more return, a bit more risk" version.

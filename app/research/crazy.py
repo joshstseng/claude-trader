@@ -60,8 +60,8 @@ def engine(entry, *, side=1, k_stop=3.0, use_stop=True, target_r=None, exit_rule
                     px = (max(x.o, tgt) if side > 0 else min(x.o, tgt))
                     break
                 best = max(best, x.h) if side > 0 else min(best, x.l)
-                if trail == 'atr2' or trail == 'atr1':                # chandelier trail from the best price
-                    m = 2.0 if trail == 'atr2' else 1.0
+                if isinstance(trail, (int, float)) or trail in ('atr2', 'atr1'):   # chandelier trail from the best price
+                    m = trail if isinstance(trail, (int, float)) else (2.0 if trail == 'atr2' else 1.0)
                     lvl = best - side * m * d['a'][j]
                     if stop is None or ((lvl > stop) if side > 0 else (lvl < stop)):
                         stop = lvl
