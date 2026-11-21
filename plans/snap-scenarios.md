@@ -60,6 +60,22 @@ Written 2026-11-20 after the user asked for Snap to beat simply owning an ETF. *
 
 **Its weak spot:** in 2016–2020 it made about 18.5% a year against QQQ's 24.4%. The 200-day filter sells late and buys back late around fast V-shaped recoveries (2018, 2020). It pulls ahead in years with a real bear market (2022) and in strong bull years.
 
+## With the trailing-stop exit (from [snap-crazy.md](snap-crazy.md))
+Snap's 5-day-average exit is replaced by a stop trailing 1 × ATR under the best high, with a 2 × ATR starting stop:
+
+| Scenario | 5-day-average exit | 1 × ATR trailing stop |
+|---|---|---|
+| Trend QQQ + Snap adds 25% in 2× ETFs | 24.1% a year, −35%, Sharpe 1.01 | **28.7% a year, −37%, Sharpe 1.11** |
+| Trend QQQ + Snap adds 15% in 2× ETFs | 20.7% a year, −30%, Sharpe 1.01 | **23.5% a year, −31%, Sharpe 1.09** |
+| Snap alone, 25% per position, T-bills | 7.1% a year, −10%, Sharpe 1.12 | 10.0% a year, −10%, **Sharpe 1.36** |
+
+**Return a year by period, trail version:**
+
+| Scenario | 2016–20 | 2021–23 | 2024–26 |
+|---|---|---|---|
+| Trend QQQ + Snap adds 25% in 2× ETFs | 21.7% | 31.4% | 39.1% |
+| Trend QQQ + Snap adds 15% in 2× ETFs | 19.5% | 24.1% | 30.2% |
+
 ## Takeaways
 - **Snap alone can't beat the market;** it's invested only about 18% of the time.
 - **Two things help:**

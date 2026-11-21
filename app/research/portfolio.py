@@ -115,7 +115,9 @@ class SnapSignals:
     after the next open (True on a signal day and while in a trade; False on the exit or stop day)."""
 
     def __init__(self, mkt: Market, und: str, rsi_below=10, ibs_below=0.1, trend=200, exit_ma=5, atr_mult=3.0,
-                 max_days=20, use_stop=True):
+                 max_days=20, use_stop=True, trail: float | None = None, start_stop: float | None = None):
+        """trail: exit only by a stop trailing `trail` × ATR under the best high (no average exit, 250-day cap);
+        start_stop: the starting stop in ATRs when trailing (default atr_mult)."""
         b, c = mkt.bars[und], mkt.c[und]
         r, tr, ex, a = rsi(c, 2), sma(c, trend), sma(c, exit_ma), atr(b)
         self.want = [False] * len(b)
@@ -127,10 +129,15 @@ class SnapSignals:
                 continue
             self.want[i] = True                                       # buy at the next open
             k = i + 1
-            stop = b[k].o - atr_mult * a[i]
-            j = k
+            stop = b[k].o - (start_stop or atr_mult if trail else atr_mult) * a[i]
+            j, best = k, b[k].o
             while j < len(b) - 1:
-                if (use_stop and b[j].l <= stop) or c[j] > ex[j] or j - i >= max_days:
+                if trail:
+                    if b[j].l <= stop or j - i >= 250:
+                        break
+                    best = max(best, b[j].h)
+                    stop = max(stop, best - trail * a[j])
+                elif (use_stop and b[j].l <= stop) or c[j] > ex[j] or j - i >= max_days:
                     break                                              # sell at the next open
                 self.want[j] = True
                 j += 1
