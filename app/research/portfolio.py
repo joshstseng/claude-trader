@@ -67,7 +67,7 @@ class Market:
 
 
 def run(name: str, mkt: Market, decide, *, start_equity: float = 50_000.0, margin_rate: float = 0.07,
-        idle: str | None = None, max_gross: float = 2.0) -> Result:
+        idle: str | None = None, max_gross: float = 2.0, track=None) -> Result:
     """decide(k, held_weights) -> {sym: weight} at the close of day k (weights of equity; idle cash added if set)."""
     n = len(mkt.dates)
     cash, shares = start_equity, {}
@@ -103,6 +103,8 @@ def run(name: str, mkt: Market, decide, *, start_equity: float = 50_000.0, margi
             cash *= 1 + margin_rate / 252
         value = cash + sum(q * mkt.c[s][k] for s, q in shares.items())
         eq.append(value)
+        if track:
+            track(k, shares, value)
         gross_sum += sum(q * mkt.c[s][k] for s, q in shares.items() if s != idle) / value if value > 0 else 0
         pending = decide(k, target)
     return Result(name, eq, mkt.dates, trades, gross_sum / n)

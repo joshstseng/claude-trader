@@ -57,3 +57,20 @@ Developed on QQQ, SPY, IWM and DIA, 2001–2026. The test is **15 ETFs never use
 | **F. VIX > 20 + trend + 1.5×ATR trail** | 941 | **2.02** | +$81.2k | 15/15 | +$23.1k | **100%** | **pass** |
 
 **Caveats:** these ETFs are correlated, so 15 profitable ETFs are not 15 independent proofs. The dollar totals are per-ETF sums with no portfolio cap, so they are not what one account would earn.
+
+# Third holdout, frozen 2026-11-20 before running
+Period: **January 1990 to May 2000**, using the Nasdaq-100, S&P 500, Russell 2000 and Dow **indexes** as stand-ins (the ETFs mostly didn't exist). VIX data starts in 1990. Index prices exclude dividends, which understates anything that holds the market. 2× products are simulated with the same 1.65% yearly drag plus financing.
+
+The dip signal for both systems is **F**: VIX above 20, above the 200-day average, RSI(2) < 10 or IBS < 0.1; 3×ATR starting stop, 1.5×ATR trail.
+
+| System | Rules |
+|---|---|
+| **Defensive** | Only the dips: 25% of the account per signal, in the 2× version; idle cash in T-bills |
+| **Balanced** | Hold the Nasdaq-100 while above its 200-day average (else T-bills), plus 15% of the account per dip signal in the 2× version |
+
+**Pass bar for each:**
+1. Positive return with a Sharpe of at least 0.5
+2. Worst drop under 35%
+3. The real dip timing beats at least 95% of 500 random-timing calendars
+
+The 1990s were a huge bull market, so **matching buy-and-hold is not part of the bar**.
