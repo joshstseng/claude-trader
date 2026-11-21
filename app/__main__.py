@@ -375,6 +375,9 @@ def cmd_run(a) -> int:
     logs.setup()
     rules = settings.risk_rules()
     sid = os.environ.get("STRATEGY", "orb").strip().lower() or "orb"   # the bot this process runs
+    if sid == "bumi":                                    # Bumi holds for days: its own routine (app/bumi_run.py)
+        from app import bumi_run
+        return bumi_run.run()
     strategies.set_active(sid)
     orb = strategies.load(sid)          # (named orb for history: it's whichever strategy STRATEGY says)
     al = settings.alpaca_settings()

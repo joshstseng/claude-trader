@@ -1,0 +1,41 @@
+{
+  "id": "bumi",
+  "name": "Bumi (Defensive dips + calm-market QQQ)",
+  "enabled": true,
+  "note": "Runs through app/bumi_run.py when STRATEGY=bumi, not through BRAINS. BUMI_MODE=paper sends orders; anything else is shadow. Rules from plans/snap-research.md and plans/defensive-tests.md. Backtest reference: run #77. Stops are checked after the close and sold at the next open; never use a resting stop.",
+  "universe": {
+    "QQQ": "QLD",
+    "SPY": "SSO",
+    "IWM": "UWM",
+    "DIA": "DDM"
+  },
+  "entry": {
+    "vix_above": 20,
+    "trend_sma": 200,
+    "rsi_period": 2,
+    "rsi_below": 10,
+    "ibs_below": 0.1
+  },
+  "stop": {
+    "atr_period": 14,
+    "start_atr": 3.0,
+    "trail_atr": 1.5,
+    "max_days": 250
+  },
+  "core": {
+    "symbol": "QQQ",
+    "weight": 0.5,
+    "trend_symbol": "SPY",
+    "trend_sma": 200,
+    "vix_below": 20
+  },
+  "sizing": {
+    "dip_weight": 0.25
+  },
+  "account": {
+    "size_usd": 50000
+  },
+  "costs": {
+    "slippage_bp": 1.0
+  }
+}
