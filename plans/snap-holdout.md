@@ -48,3 +48,12 @@ Developed on QQQ, SPY, IWM and DIA, 2001–2026. The test is **15 ETFs never use
 2. At least 11 of the 15 ETFs are profitable
 3. Beats at least 95% of 1,000 random-timing calendars (pooled)
 4. Higher pooled profit factor than the control (A)
+
+## Second holdout result (run once, 2026-11-20): E and F PASSED
+| | Trades | Pooled PF | Profit (ETFs traded separately) | ETFs profitable | Random median | Beats random | Bar |
+|---|---|---|---|---|---|---|---|
+| A. Snap (control) | 3,301 | 1.38 | +$80.2k | 15/15 | +$43.8k | 99.9% | passes the first three checks |
+| **E. Fear dips** | 3,995 | 1.40 | +$112.1k | 15/15 | +$58.4k | 99.5% | **pass** |
+| **F. VIX > 20 + trend + 1.5×ATR trail** | 941 | **2.02** | +$81.2k | 15/15 | +$23.1k | **100%** | **pass** |
+
+**Caveats:** these ETFs are correlated, so 15 profitable ETFs are not 15 independent proofs. The dollar totals are per-ETF sums with no portfolio cap, so they are not what one account would earn.
