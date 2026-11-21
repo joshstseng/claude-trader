@@ -33,3 +33,18 @@ For context, buy and hold over the same period: QQQ 3.0% a year (worst drop −8
 - All four made money through the dot-com crash and 2008, and B, C and D beat random timing. So the dip effect is real, but weaker than 2016–2026 suggested.
 - The 2016–2026 headline numbers (+$57k, 28.7% a year) should not be expected going forward.
 - This holdout has now been used. Anything designed after seeing it can't be judged on it as untouched data.
+
+# Second holdout, frozen 2026-11-20 before running
+Developed on QQQ, SPY, IWM and DIA, 2001–2026. The test is **15 ETFs never used before 2016** (XLK, XLF, XLV, XLY, XLP, XLI, XLU, XLB, XLE, MDY, EFA, EWJ, EWG, EWU, EWC), from August 2001 (EFA's start) to December 2015. Each ETF is traded on its own at 1% risk and the results are pooled.
+
+| | Entry | Stop | Exit |
+|---|---|---|---|
+| **A. Snap (control)** | above the 200-day; RSI(2) < 10 or IBS < 0.1 | 3×ATR | first close above the 5-day average |
+| **E. Fear dips** | **VIX above 15**, no 200-day filter; RSI(2) < 10 or IBS < 0.1 | 3×ATR | first close above the 5-day average |
+| **F. Fear + trend + trail** | **VIX above 20**, above the 200-day; RSI(2) < 10 or IBS < 0.1 | 3×ATR | 1.5×ATR trailing stop |
+
+**A candidate passes if all hold:**
+1. Pooled profit factor of at least 1.3
+2. At least 11 of the 15 ETFs are profitable
+3. Beats at least 95% of 1,000 random-timing calendars (pooled)
+4. Higher pooled profit factor than the control (A)
