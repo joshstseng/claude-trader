@@ -115,8 +115,8 @@ class Result:
 
 
 class Data:
-    def __init__(self, syms=CORE):
-        self.m = Market(list(syms))
+    def __init__(self, syms=CORE, market=None):
+        self.m = market or Market(list(syms))
         self.ind = {}
         for s in syms:
             b, c = self.m.bars[s], self.m.c[s]
