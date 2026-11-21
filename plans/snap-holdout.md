@@ -74,3 +74,7 @@ The dip signal for both systems is **F**: VIX above 20, above the 200-day averag
 3. The real dip timing beats at least 95% of 500 random-timing calendars
 
 The 1990s were a huge bull market, so **matching buy-and-hold is not part of the bar**.
+
+**Amendments, written before running, after a data check:**
+- Yahoo's 1990s index opens equal the prior close on 75–84% of days, so true next-open fills can't be simulated. Fills in this test are effectively **at the signal day's close**. To be conservative, slippage is raised **from 1 bp to 5 bp** each way.
+- The Dow's history starts in 1992, so this test uses **three indexes** (Nasdaq-100, S&P 500, Russell 2000) to keep 1990–91.
