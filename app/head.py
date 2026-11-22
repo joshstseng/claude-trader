@@ -48,7 +48,8 @@ SUMMARY_FROM = dtime(16, 15)  # the fleet summary posts once every bot has hande
 SUMMARY_DEADLINE = dtime(17, 0)   # ...or at 5:00 PM ET, naming any bot that didn't
 FLATTEN_WAIT_S = 60
 DAY_FMT = "%a %b %d"
-OWN_LEDGER_BOTS = ("bumi",)     # multi-day bots that keep their own trade ledger and publish numbers:<bot>
+OWN_LEDGER_BOTS = ("bumi", "swing")     # bots that keep their own trade ledger and publish numbers:<bot>
+OVERNIGHT_BOTS = ("bumi",)              # of those, the ones that are meant to hold past the close
 
 
 # ------------------------------------------------------------------------ settings
@@ -266,7 +267,7 @@ def own_ledger_numbers(trade_log: tradelog.TradeLog, bot: str, day: str) -> dict
     return {"bot": bot, "signals": 0, "alerts": 0, "orders": d.get("orders", 0), "filled": d.get("filled", 0),
             "closed": d.get("closed", 0), "wins": d.get("wins", 0), "day_pnl": d.get("day_pnl", 0.0),
             "all_time": x.get("all_time", 0.0), "all_trades": x.get("all_trades", 0), "open": x.get("open", 0),
-            "at_risk": x.get("at_risk", 0.0), "swing": True}
+            "at_risk": x.get("at_risk", 0.0), "swing": bot in OVERNIGHT_BOTS}
 
 
 def bot_numbers(trade_log: tradelog.TradeLog, bot: str, day: str) -> dict:

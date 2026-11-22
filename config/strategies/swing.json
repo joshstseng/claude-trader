@@ -1,0 +1,24 @@
+{
+  "id": "swing",
+  "name": "Swing v1.1 (Nasdaq noise-band breakout + 15m FVG exit)",
+  "enabled": true,
+  "note": "Separate bot. Runs through app/swing_run.py when STRATEGY=swing, not through BRAINS. SWING_MODE=paper sends orders; anything else is shadow. Trades QQQ as the paper stand-in for MNQ because Tradovate's API needs a funded account. Swing v1 runs beside it as a model only. Rules: app/research/swing/FROZEN_INTRADAY.md and FROZEN_PD.md.",
+  "symbol": "QQQ",
+  "band": {
+    "lookback_sessions": 14,
+    "check_every_bars": 6,
+    "first_check_bar": 5
+  },
+  "fvg": {
+    "candle_bars": 3
+  },
+  "sizing": {
+    "reference_usd": 100000,
+    "daily_vol_target": 0.01,
+    "max_exposure": 2.0
+  },
+  "costs": {
+    "model_bp_per_side": 0.6
+  },
+  "flat_at": "15:58:45"
+}

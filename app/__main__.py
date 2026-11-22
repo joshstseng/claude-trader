@@ -378,6 +378,9 @@ def cmd_run(a) -> int:
     if sid == "bumi":                                    # Bumi holds for days: its own routine (app/bumi_run.py)
         from app import bumi_run
         return bumi_run.run()
+    if sid == "swing":                                   # Swing v1.1 is a separate intraday bot (app/swing_run.py)
+        from app import swing_run
+        return swing_run.run()
     strategies.set_active(sid)
     orb = strategies.load(sid)          # (named orb for history: it's whichever strategy STRATEGY says)
     al = settings.alpaca_settings()
