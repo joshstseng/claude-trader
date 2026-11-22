@@ -48,6 +48,7 @@ SUMMARY_FROM = dtime(16, 15)  # the fleet summary posts once every bot has hande
 SUMMARY_DEADLINE = dtime(17, 0)   # ...or at 5:00 PM ET, naming any bot that didn't
 FLATTEN_WAIT_S = 60
 DAY_FMT = "%a %b %d"
+OWN_LEDGER_BOTS = ("bumi",)     # multi-day bots that keep their own trade ledger and publish numbers:<bot>
 
 
 # ------------------------------------------------------------------------ settings
@@ -252,7 +253,25 @@ def fleet_bots(trade_log: tradelog.TradeLog, now: datetime, day: str | None = No
     return sorted(bots)
 
 
+def own_ledger(trade_log: tradelog.TradeLog, bot: str) -> dict:
+    try:
+        return json.loads(trade_log.fleet(f"numbers:{bot}") or "{}")
+    except ValueError:
+        return {}
+
+
+def own_ledger_numbers(trade_log: tradelog.TradeLog, bot: str, day: str) -> dict:
+    x, d = own_ledger(trade_log, bot), {}
+    d = (x.get("days") or {}).get(day) or {}
+    return {"bot": bot, "signals": 0, "alerts": 0, "orders": d.get("orders", 0), "filled": d.get("filled", 0),
+            "closed": d.get("closed", 0), "wins": d.get("wins", 0), "day_pnl": d.get("day_pnl", 0.0),
+            "all_time": x.get("all_time", 0.0), "all_trades": x.get("all_trades", 0), "open": x.get("open", 0),
+            "at_risk": x.get("at_risk", 0.0), "swing": True}
+
+
 def bot_numbers(trade_log: tradelog.TradeLog, bot: str, day: str) -> dict:
+    if bot in OWN_LEDGER_BOTS:
+        return own_ledger_numbers(trade_log, bot, day)
     sigs = trade_log.db.execute("SELECT COUNT(*) FROM signals WHERE strategy = ? AND source = 'live' AND date = ?",
                                 (bot, day)).fetchone()[0]
     alerts = trade_log.db.execute(
@@ -323,7 +342,8 @@ def summary_text(nums: list[dict], day: str, paused: bool, missing: list[str] | 
                   else "no closed trades")
         lines.append(f"**{bot_name(n['bot'])}** · {n['signals']} signals · {n['alerts']} alerts · "
                      f"{n['orders']} orders · {trades} · all-time {_usd(n['all_time'])}"
-                     + (f" · ⚠️ {n['open']} still open" if n["open"] else ""))
+                     + ((f" · {n['open']} held overnight" if n.get("swing") else f" · ⚠️ {n['open']} still open")
+                        if n["open"] else ""))
     if len(nums) > 1:
         lines.append(f"**Fleet today {_usd(sum(n['day_pnl'] for n in nums))}** · all-time "
                      f"{_usd(sum(n['all_time'] for n in nums))}")
@@ -585,7 +605,8 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 return None
             if await asyncio.to_thread(self.log.fleet, "head_instance") not in (None, INSTANCE):
                 return None                                    # a newer copy of the head owns the message
-            busy = bool(await asyncio.to_thread(self.log.open_orders))
+            busy = bool(await asyncio.to_thread(self.log.open_orders)) or any(
+                [(await asyncio.to_thread(own_ledger, self.log, b)).get("open", 0) for b in OWN_LEDGER_BOTS])
             state = json.loads(await asyncio.to_thread(self.log.fleet, "head_idle") or "{}")
             ch = await self.idle_channel()
             if self._idle_msg is None and state.get("msg"):    # after a restart: pick the message back up

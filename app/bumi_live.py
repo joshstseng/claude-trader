@@ -56,6 +56,11 @@ class State:
     def __init__(self, path: Path = STATE_FILE):
         self.path = Path(path)
         self.doc = json.loads(self.path.read_text()) if self.path.exists() else {"core": 0.0, "virtual": {}, "days": {}}
+        self.doc.setdefault("ledger", {"open": {}, "closed": [], "fills": [], "warned": []})
+
+    @property
+    def ledger(self) -> dict:
+        return self.doc["ledger"]
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +96,22 @@ class AlpacaBumi:
             return None
         return {"status": getattr(o.status, "value", str(o.status)), "filled_qty": int(float(o.filled_qty or 0)),
                 "filled_price": float(o.filled_avg_price) if o.filled_avg_price else None}
+
+    def position_details(self) -> dict[str, dict]:
+        return {p.symbol: {"qty": int(float(p.qty)), "price": float(p.current_price) if p.current_price else None}
+                for p in self.t.get_all_positions()}
+
+    def last_sell(self, sym: str, since: str) -> dict | None:
+        """The newest filled sell of `sym` on or after the day `since` (a flatten, or a close made in Alpaca)."""
+        from alpaca.trading.enums import OrderSide, QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        after = datetime.combine(date.fromisoformat(since), dtime(0), tzinfo=NY)
+        for o in self.t.get_orders(GetOrdersRequest(status=QueryOrderStatus.CLOSED, symbols=[sym], side=OrderSide.SELL,
+                                                    after=after, limit=10)):
+            if o.filled_avg_price and float(o.filled_qty or 0) > 0:
+                return {"price": float(o.filled_avg_price), "qty": int(float(o.filled_qty)),
+                        "day": o.filled_at.astimezone(NY).date().isoformat()}
+        return None
 
     def close_all(self) -> None:
         self.t.close_all_positions(cancel_orders=True)
@@ -158,7 +179,7 @@ def decide(plan: dict, s: dict, state: State, closes: dict[str, float], run_mode
         equity = float(s["account"]["size_usd"])
     orders, notes = build_orders(plan, s, equity, held, closes, state.doc["core"])
     rec = {"plan": plan, "orders": [asdict(o) for o in orders], "notes": notes, "mode": run_mode, "sent": False,
-           "confirmed": False, "next_core": plan["targets"].get(s["core"]["symbol"], 0.0)}
+           "confirmed": False, "closes": closes, "next_core": plan["targets"].get(s["core"]["symbol"], 0.0)}
     if run_mode != "paper":                            # shadow keeps a virtual book, so its sells have shares
         for o in orders:
             q = held.get(o.sym, 0) + (o.qty if o.side == "buy" else -o.qty)
@@ -207,8 +228,100 @@ def send(prev_session: str, now: datetime, state: State, run_mode: str, broker=N
     return out
 
 
-def confirm(prev_session: str, state: State, broker) -> list[str]:
-    """After the open: every order filled in full? Returns the problems (empty is clean)."""
+def book_fill(state: State, sym: str, side: str, qty: int, price: float, day: str, why: str, s: dict) -> dict | None:
+    """Update Bumi's own ledger from a real fill. A sell returns the closed-trade record."""
+    led = state.ledger
+    led["fills"].append({"day": day, "sym": sym, "side": side, "qty": qty, "price": price})
+    lot = led["open"].get(sym)
+    if side == "buy":
+        if lot:
+            lot["entry"] = (lot["entry"] * lot["qty"] + price * qty) / (lot["qty"] + qty)
+            lot["qty"] += qty
+        else:
+            under = next((u for u, e in s["universe"].items() if e == sym), None)
+            led["open"][sym] = {"sym": sym, "qty": qty, "entry": price, "day_in": day, "kind": "dip" if under else "core",
+                                "under": under, "why": why, "card": None}
+        return None
+    if not lot:
+        return None
+    q = min(qty, lot["qty"])
+    done = {"sym": sym, "qty": q, "entry": lot["entry"], "exit": price, "pnl": round((price - lot["entry"]) * q, 2),
+            "day_in": lot["day_in"], "day_out": day, "kind": lot["kind"], "why": why, "card_posted": False,
+            "live_card": None}
+    lot["qty"] -= q
+    if lot["qty"] <= 0:
+        done["live_card"] = lot.get("card")
+        del led["open"][sym]
+    led["closed"].append(done)
+    return done
+
+
+def stop_for(state: State, sym: str) -> float | None:
+    """The newest stop for a dip position, on its index ETF (from the latest plan)."""
+    days = sorted(state.doc["days"])
+    if not days:
+        return None
+    for r in state.doc["days"][days[-1]]["plan"]["rows"]:
+        if r["etf"] == sym and r["action"] == "hold":
+            return r["stop"]
+    return None
+
+
+def numbers(state: State) -> dict:
+    """Bumi's realized results for Uri's fleet summary."""
+    led, days = state.ledger, {}
+
+    def day(d):
+        return days.setdefault(d, {"orders": 0, "filled": 0, "closed": 0, "wins": 0, "day_pnl": 0.0})
+    for f in led["fills"]:
+        x = day(f["day"])
+        x["orders"] += 1
+        x["filled"] += 1
+    for t in led["closed"]:
+        x = day(t["day_out"])
+        x["closed"] += 1
+        x["wins"] += t["pnl"] > 0
+        x["day_pnl"] = round(x["day_pnl"] + t["pnl"], 2)
+    closes = {}
+    if state.doc["days"]:
+        closes = state.doc["days"][sorted(state.doc["days"])[-1]].get("closes") or {}
+    risk = 0.0
+    for sym, lot in led["open"].items():
+        stop, px, under_px = stop_for(state, sym), closes.get(sym), closes.get(lot.get("under"))
+        if lot["kind"] == "dip" and stop and px and under_px:
+            risk += lot["qty"] * px * 2 * max(under_px - stop, 0) / under_px   # a 2x fund moves twice its index
+    return {"days": days, "all_time": round(sum(t["pnl"] for t in led["closed"]), 2), "all_trades": len(led["closed"]),
+            "open": len(led["open"]), "at_risk": round(risk, 2)}
+
+
+def reconcile(state: State, broker, s: dict, today: str) -> list[str]:
+    """Catch positions closed outside the plan (a flatten, or by hand in Alpaca). Each mismatch is reported once."""
+    held, notes = broker.positions(), []
+    warned = state.ledger["warned"]
+
+    def warn(key, text):
+        if key not in warned:
+            warned.append(key)
+            notes.append(text)
+    for sym, lot in list(state.ledger["open"].items()):
+        have = held.get(sym, 0)
+        if have < lot["qty"]:
+            fill = broker.last_sell(sym, lot["day_in"])
+            if fill:
+                book_fill(state, sym, "sell", lot["qty"] - have, fill["price"], fill["day"], "closed outside the plan", s)
+            else:
+                warn(f"{today}:{sym}:missing", f"{sym}: Bumi's records show {lot['qty']}, Alpaca shows {have}")
+        elif have > lot["qty"]:
+            warn(f"{today}:{sym}:extra", f"{sym}: Alpaca shows {have}, Bumi's records show {lot['qty']}")
+    for sym, q in held.items():
+        if sym not in state.ledger["open"]:
+            warn(f"{today}:{sym}:unknown", f"{sym}: {q} shares in Alpaca that Bumi didn't record")
+    state.save()
+    return notes
+
+
+def confirm(prev_session: str, state: State, broker, fill_day: str | None = None, s: dict | None = None) -> list[str]:
+    """After the open: every order filled in full? Books the fills. Returns the problems (empty is clean)."""
     rec = state.day(prev_session)
     if rec is None or rec.get("mode") != "paper" or not rec["sent"]:
         return []
@@ -221,6 +334,11 @@ def confirm(prev_session: str, state: State, broker) -> list[str]:
         o["status"], o["filled_qty"], o["filled_price"] = have["status"], have["filled_qty"], have["filled_price"]
         if have["status"] != "filled" or have["filled_qty"] != o["qty"]:
             problems.append(f"{o['sym']} {o['side']}: {have['status']}, {have['filled_qty']}/{o['qty']} filled")
+    if s is not None and not rec.get("booked"):
+        for o in rec["orders"]:
+            if o.get("filled_qty") and o.get("filled_price"):
+                book_fill(state, o["sym"], o["side"], o["filled_qty"], o["filled_price"], fill_day or prev_session, o["why"], s)
+        rec["booked"] = True
     rec["confirmed"] = True
     state.save()
     return problems

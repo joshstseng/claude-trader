@@ -4,11 +4,13 @@ and Uri's fleet commands. Trading logic lives in app/bumi_live.py and app/strate
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 from datetime import date, datetime, time as dtime, timedelta, timezone
 
 from app import bumi_live as L
+from app.bumi_cards import BumiCards
 from app import market, settings, strategies, tradelog, vix as vixdata
 from app.research.data import D
 from app.strategies import bumi
@@ -104,7 +106,7 @@ class Routine:
             await self.send(key, now, rec)
         if rec and rec["mode"] == "paper" and rec["sent"] and not rec["confirmed"] and rec["orders"] \
                 and t >= session.at(L.CONFIRM_AFTER):
-            await self.confirm(key, rec)
+            await self.confirm(key, rec, t.date().isoformat())
 
     async def hand_in_report(self, day: date) -> None:
         """Uri's daily summary waits for every bot, so this goes in on time, before the 4:30 PM decision."""
@@ -161,9 +163,13 @@ class Routine:
         elif problems and problems != ["already sent"]:
             log.info("send: %s", problems)
 
-    async def confirm(self, key: str, rec: dict) -> None:
+    def awaiting_fills(self) -> bool:
+        return any(r["mode"] == "paper" and r["sent"] and r["orders"] and not r["confirmed"]
+                   for r in self.state.doc["days"].values())
+
+    async def confirm(self, key: str, rec: dict, fill_day: str | None = None) -> None:
         try:
-            problems = await asyncio.to_thread(L.confirm, key, self.state, self.broker)
+            problems = await asyncio.to_thread(L.confirm, key, self.state, self.broker, fill_day, self.s)
         except Exception:  # noqa: BLE001
             log.warning("fill check failed, will retry", exc_info=True)
             return
@@ -211,6 +217,26 @@ async def live() -> None:
 
     routine = Routine(s, state, calendar, broker, lambda d, n: fetch_inputs(data_client, s, d, n), post,
                       lambda d, t: db.save_report("bumi", d, t), db.global_pause, run_mode)
+
+    live_cards = BumiCards(state, broker, lambda c: client.get_channel(c) or client.fetch_channel(c),
+                           cfg.channel_live_trades, cfg.channel_closed_trades)
+
+    async def ledger():
+        """Every minute: positions closed outside the plan, the trade cards, and Uri's numbers."""
+        await ready.wait()
+        while run_mode == "paper":
+            try:
+                async with busy:
+                    today = datetime.now(NY).date().isoformat()
+                    if not routine.awaiting_fills():
+                        notes = await asyncio.to_thread(L.reconcile, state, broker, s, today)
+                        if notes:
+                            await post("system", "⚠️ **Bumi's positions need a look**\n" + "\n".join(notes), True)
+                    await live_cards.sync(today)
+                    await asyncio.to_thread(db.set_fleet, "numbers:bumi", json.dumps(L.numbers(state)))
+            except Exception:  # noqa: BLE001 - cards never get in the way of trading
+                log.warning("couldn't update Bumi's cards", exc_info=True)
+            await asyncio.sleep(60)
 
     async def ticks():
         while True:
@@ -261,7 +287,7 @@ async def live() -> None:
         equity = await asyncio.to_thread(broker.equity)
         await post("system", f"🟢 **Bumi online** · {'**paper orders on**' if run_mode == 'paper' else '👻 shadow, no orders'}"
                    f" · account ${equity:,.0f}", False)
-        tasks = [asyncio.create_task(x()) for x in (ticks, beats, commands)]
+        tasks = [asyncio.create_task(x()) for x in (ticks, beats, commands, ledger)]
         try:
             await bot
         except asyncio.CancelledError:
