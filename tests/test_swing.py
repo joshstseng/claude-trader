@@ -207,5 +207,44 @@ class Fleet(unittest.TestCase):
         self.assertTrue(head.own_ledger_numbers(Log(), "bumi", "2026-11-23")["swing"])
 
 
+class Pings(unittest.TestCase):
+    trade = {"day": "2026-11-23", "side": 1, "qty": 10, "entry": 100.0, "exit": 101.0, "pnl": 10.0,
+             "time_in": "10:05:00", "time_out": "11:00:00", "why": "back inside the band"}
+
+    def test_live_and_closed_cards_mention_the_owner(self):
+        self.assertEqual(L.live_ping({"side": -1}, "QQQ", 7), "<@7> 🟢 **QQQ SHORT** · Swing v1.1")
+        head_line, body, _ = L.closed_message(self.trade, "QQQ", 7)
+        self.assertTrue(head_line.startswith("<@7> ✅ **QQQ LONG** · Swing v1.1"))
+        self.assertNotIn("<@", body)
+        self.assertIn("Exit: back inside the band", body)
+
+    def test_unping_only_edits_that_days_cards_and_is_repeatable(self):
+        import asyncio
+        from app.swing_run import unping_cards
+
+        class Msg:
+            def __init__(self, content):
+                self.content, self.edits = content, 0
+
+            async def edit(self, content):
+                self.content, self.edits = content, self.edits + 1
+
+        class Channel:
+            def __init__(self):
+                self.msgs = {1: Msg("<@7> ✅ today"), 2: Msg("<@7> ❌ yesterday")}
+
+            async def fetch_message(self, i):
+                return self.msgs[i]
+
+        ch = Channel()
+        trades = [{"day": "2026-11-23", "closed_card": "1"}, {"day": "2026-11-20", "closed_card": "2"},
+                  {"day": "2026-11-23"}]
+        self.assertEqual(asyncio.run(unping_cards(ch, trades, "2026-11-23")), 1)
+        self.assertEqual(ch.msgs[1].content, "✅ today")
+        self.assertEqual(ch.msgs[2].content, "<@7> ❌ yesterday")
+        self.assertEqual(asyncio.run(unping_cards(ch, trades, "2026-11-23")), 0)
+        self.assertEqual(ch.msgs[1].edits, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

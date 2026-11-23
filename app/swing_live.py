@@ -193,6 +193,18 @@ def closed_text(t: dict, sym: str) -> tuple[str, int]:
     return text, 0x2ECC71 if t["pnl"] > 0 else 0xE74C3C if t["pnl"] < 0 else 0x95A5A6
 
 
+def live_ping(lot: dict, sym: str, owner_id: int) -> str:
+    """The @mention line on a new live card. It stays fixed while the embed's P&L refreshes."""
+    return f"<@{owner_id}> 🟢 **{sym} {'LONG' if lot['side'] > 0 else 'SHORT'}** · Swing v1.1"
+
+
+def closed_message(t: dict, sym: str, owner_id: int) -> tuple[str, str, int]:
+    """(message with the @mention and headline, embed body, color), laid out like Orbi's closed cards."""
+    text, color = closed_text(t, sym)
+    head, body = text.split("\n", 1)
+    return f"<@{owner_id}> {head}", body, color
+
+
 class Routine:
     """One tick of Swing's day. Everything external is passed in, so tests run it on a fake clock and broker."""
 

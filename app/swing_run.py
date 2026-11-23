@@ -1,5 +1,6 @@
 """Swing v1.1's live process (STRATEGY=swing): its own Discord client, a tick every 5 seconds, a heartbeat for Uri's
-watchdog, Uri's fleet commands, and information-only trade cards. Rules live in app/strategies/swing.py."""
+watchdog, Uri's fleet commands, and information-only trade cards that @mention the owner until Uri's daily summary.
+Rules live in app/strategies/swing.py."""
 
 from __future__ import annotations
 
@@ -22,6 +23,24 @@ def bar_rows(data_client, sym: str, start: datetime, end: datetime | None, feed)
     got = data_client.get_stock_bars(StockBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame(5, TimeFrameUnit.Minute), feed=feed,
                                                       adjustment=Adjustment.ALL, start=start, end=end)).data
     return [(b.timestamp, b.open, b.high, b.low, b.close) for b in got.get(sym, [])]
+
+
+async def unping_cards(ch, trades: list[dict], day: str) -> int:
+    """Take the @mention off one day's closed cards after Uri's summary. Editing never pings again."""
+    import discord
+    from app.discord_bot import MENTION_RE
+    n = 0
+    for t in trades:
+        if t["day"] != day or not t.get("closed_card"):
+            continue
+        try:
+            msg = await ch.fetch_message(int(t["closed_card"]))
+        except discord.NotFound:
+            continue
+        if MENTION_RE.match(msg.content or ""):
+            await msg.edit(content=MENTION_RE.sub("", msg.content, count=1))
+            n += 1
+    return n
 
 
 async def live() -> None:
@@ -85,9 +104,9 @@ async def live() -> None:
                                 await (await channel(cfg.channel_live_trades)).get_partial_message(int(t["live_card"])).delete()
                             except discord.NotFound:
                                 pass
-                        text, color = L.closed_text(t, sym)
-                        await (await channel(cfg.channel_closed_trades)).send(embed=discord.Embed(description=text, color=color), silent=True)
-                        t["card_posted"], t["live_card"] = True, None
+                        head, body, color = L.closed_message(t, sym, cfg.owner_id)
+                        out = await (await channel(cfg.channel_closed_trades)).send(head, embed=discord.Embed(description=body, color=color))
+                        t["card_posted"], t["live_card"], t["closed_card"] = True, None, str(out.id)
                         await asyncio.to_thread(state.save)
                     lot = led["open"]
                     if lot and cfg.channel_live_trades:
@@ -99,7 +118,7 @@ async def live() -> None:
                             if lot.get("card"):
                                 await ch.get_partial_message(int(lot["card"])).edit(embed=embed)
                             else:
-                                lot["card"] = str((await ch.send(embed=embed, silent=True)).id)
+                                lot["card"] = str((await ch.send(L.live_ping(lot, sym, cfg.owner_id), embed=embed)).id)
                                 await asyncio.to_thread(state.save)
                         except discord.NotFound:
                             lot["card"] = None
@@ -137,7 +156,10 @@ async def live() -> None:
                             result = await asyncio.to_thread(routine.flatten, datetime.now(NY).date().isoformat())
                         await post_async("system", f"🛑 **Swing v1.1 flatten:** {result}", False)
                     elif c["command"] == "unping":
-                        result = "no closed-trade pings"
+                        async with busy:
+                            trades = list(state.ledger["closed"])
+                        n = await unping_cards(await channel(cfg.channel_closed_trades), trades, c["note"])
+                        result = f"took the @mention off {n} card{'' if n == 1 else 's'}"
                     else:
                         result = f"unknown command {c['command']!r}, ignored"
                     await asyncio.to_thread(cmds.ack_command, c["id"], "swing", result)
