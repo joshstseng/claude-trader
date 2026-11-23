@@ -185,7 +185,7 @@ async def live() -> None:
         except asyncio.CancelledError:
             log.info("Stopping")
             try:
-                await asyncio.wait_for(post_async("system", "🔴 **Swing v1.1 stopped.** No new orders until it's back.", True), 10)
+                await asyncio.wait_for(post_async("system", "🔴 **Swing v1.1 stopped.** No new orders until it's back.", False), 10)
             except Exception:  # noqa: BLE001
                 pass
         finally:
