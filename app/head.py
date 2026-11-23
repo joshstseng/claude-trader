@@ -335,24 +335,28 @@ def summary_days(now: datetime, calendar, back: int = 7) -> list[tuple[str, bool
 def summary_text(nums: list[dict], day: str, paused: bool, missing: list[str] | None = None,
                  details: bool = False) -> str:
     d = datetime.strptime(day, "%Y-%m-%d")
-    lines = [f"🧭 **Fleet · {d:{DAY_FMT}}**" + (" · ⏸️ global pause is **on**" if paused else "")]
+    def count(x: int, word: str) -> str:
+        return f"{x} {word}{'' if x == 1 else 's'}"
+
+    blocks = [f"🧭 **Fleet · {d:{DAY_FMT}}**" + (" · ⏸️ global pause is **on**" if paused else "")]
     if not nums:
-        lines.append("No trading bots reported today.")
+        blocks.append("No trading bots reported today.")
     for n in nums:
-        trades = (f"{n['closed']} closed ({n['wins']} won) · **{_usd(n['day_pnl'])}**" if n["closed"]
+        result = (f"**{_usd(n['day_pnl'])}** · {n['closed']} closed ({n['wins']} won)" if n["closed"]
                   else "no closed trades")
-        lines.append(f"**{bot_name(n['bot'])}** · {n['signals']} signals · {n['alerts']} alerts · "
-                     f"{n['orders']} orders · {trades} · all-time {_usd(n['all_time'])}"
-                     + ((f" · {n['open']} held overnight" if n.get("swing") else f" · ⚠️ {n['open']} still open")
-                        if n["open"] else ""))
+        held = ((f" · {n['open']} held overnight" if n.get("swing") else f" · ⚠️ {n['open']} still open")
+                if n["open"] else "")
+        activity = [] if n["bot"] in OWN_LEDGER_BOTS else [count(n["signals"], "signal"), count(n["alerts"], "alert")]
+        activity += [count(n["orders"], "order"), f"all-time {_usd(n['all_time'])}"]
+        blocks.append(f"**{bot_name(n['bot'])}** · {result}{held}\n-# {' · '.join(activity)}")
     if len(nums) > 1:
-        lines.append(f"**Fleet today {_usd(sum(n['day_pnl'] for n in nums))}** · all-time "
-                     f"{_usd(sum(n['all_time'] for n in nums))}")
+        blocks.append(f"**Fleet today {_usd(sum(n['day_pnl'] for n in nums))}** · all-time "
+                      f"{_usd(sum(n['all_time'] for n in nums))}")
     for bot in missing or []:
-        lines.append(f"⚠️ No summary from **{bot_name(bot)}** by 5:00 PM ET (check its logs on Railway)")
+        blocks.append(f"⚠️ No summary from **{bot_name(bot)}** by 5:00 PM ET (check its logs on Railway)")
     if details:
-        lines.append("-# 🧵 Each bot's full summary (every signal, paper trades, costs, data check) is in the thread")
-    return "\n".join(lines)
+        blocks.append("-# 🧵 Full bot summaries are in the thread")
+    return "\n\n".join(blocks)
 
 
 def status_text(trade_log: tradelog.TradeLog, now: datetime, session: market.Session | None) -> str:

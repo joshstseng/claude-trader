@@ -141,8 +141,8 @@ class FleetDataTest(unittest.TestCase):
         self.assertEqual(head.fleet_bots(self.log, datetime.now(timezone.utc), day), ["demo", "orb"])
         text = head.summary_text([head.bot_numbers(self.log, b, day) for b in ("demo", "orb")], day, False)
         self.assertIn("🧭 **Fleet · Thu Nov 19**", text)
-        self.assertIn("**ORB bot** · 3 signals · 2 alerts · 2 orders · 1 closed (1 won) · **+$40.00** · "
-                      "all-time +$30.00 · ⚠️ 1 still open", text)
+        self.assertIn("\n\n**ORB bot** · **+$40.00** · 1 closed (1 won) · ⚠️ 1 still open\n"
+                      "-# 3 signals · 2 alerts · 2 orders · all-time +$30.00\n\n", text)
         self.assertIn("**Fleet today +$20.00**", text)
         one = head.summary_text([head.bot_numbers(self.log, "orb", day)], day, True)
         self.assertIn("global pause is **on**", one)
