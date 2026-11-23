@@ -60,7 +60,7 @@ async def live() -> None:
     client = discord.Client(intents=discord.Intents(guilds=True))
     ready = asyncio.Event()
     busy = asyncio.Lock()
-    channels = {"system": cfg.channel_system}
+    channels = {"setups": cfg.channel_setups, "system": cfg.channel_system}
     loop = asyncio.get_running_loop()
 
     @client.event
@@ -160,6 +160,9 @@ async def live() -> None:
                             trades = list(state.ledger["closed"])
                         n = await unping_cards(await channel(cfg.channel_closed_trades), trades, c["note"])
                         result = f"took the @mention off {n} card{'' if n == 1 else 's'}"
+                    elif c["command"] == "swing-morning-preview":
+                        async with busy:
+                            result = await asyncio.to_thread(routine.morning_preview, c["note"])
                     else:
                         result = f"unknown command {c['command']!r}, ignored"
                     await asyncio.to_thread(cmds.ack_command, c["id"], "swing", result)

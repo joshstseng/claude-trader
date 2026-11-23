@@ -207,6 +207,45 @@ class Fleet(unittest.TestCase):
         self.assertTrue(head.own_ledger_numbers(Log(), "bumi", "2026-11-23")["swing"])
 
 
+class Morning(Live):
+    def test_one_card_after_the_first_bar_and_it_never_blocks_trading(self):
+        r = self.routine(); self.at(r, 9, 1); self.force(r); self.at(r, 9, 35); self.at(r, 9, 40)
+        cards = [x for x in self.posts if "Swing's rundown" in x]
+        self.assertEqual(len(cards), 1)
+        self.assertIn("long above", cards[0]); self.assertIn("short below", cards[0]); self.assertIn("shares", cards[0])
+        self.assertEqual(self.broker.sent, [])
+
+    def test_a_failed_card_does_not_stop_the_day(self):
+        r = self.routine(); self.at(r, 9, 1); self.force(r)
+        good = r.post
+
+        def flaky(where, text, ping):
+            if where == "setups":
+                raise RuntimeError("discord down")
+            good(where, text, ping)
+        r.post = flaky
+        self.at(r, 9, 35); self.at(r, 10, 0); self.at(r, 10, 0, 15)
+        self.assertEqual([x[0] for x in self.broker.sent], ["buy"])
+
+    def test_no_late_card_after_a_restart_past_ten(self):
+        r = self.routine(); self.at(r, 9, 1); self.force(r); self.at(r, 10, 5)
+        self.assertFalse([x for x in self.posts if "Swing's rundown" in x])
+
+    def test_preview_posts_saved_levels_and_sends_no_orders(self):
+        r = self.routine(); self.assertEqual(r.morning_preview(DAY.isoformat()), f"no levels saved for {DAY.isoformat()}")
+        self.at(r, 9, 1); self.force(r); self.at(r, 9, 35); self.posts.clear()
+        self.assertEqual(r.morning_preview(DAY.isoformat()), "posted the morning card preview")
+        self.assertIn("Preview of this morning's card", self.posts[0])
+        self.assertEqual(self.broker.sent, [])
+
+    def test_the_line_matches_the_open(self):
+        m = {"up": [0] * 5 + [503.0], "down": [0] * 5 + [497.0], "weight": 1.0}
+        self.assertIn("$503.00", L.morning_text("2026-11-24", "QQQ", 503.0, m, 498.0, 100000).split("short")[0])
+        wild = L.morning_text("2026-11-24", "QQQ", 500.0, {**m, "weight": .5}, 500.0, 100000)
+        self.assertTrue(any(x in wild for x in L.MORNING_LINES["wild"]))
+        self.assertIn("**100 shares**", wild)
+
+
 class Pings(unittest.TestCase):
     trade = {"day": "2026-11-23", "side": 1, "qty": 10, "entry": 100.0, "exit": 101.0, "pnl": 10.0,
              "time_in": "10:05:00", "time_out": "11:00:00", "why": "back inside the band"}

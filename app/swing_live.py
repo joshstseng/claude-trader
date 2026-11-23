@@ -205,6 +205,36 @@ def closed_message(t: dict, sym: str, owner_id: int) -> tuple[str, str, int]:
     return f"<@{owner_id}> {head}", body, color
 
 
+MORNING_LINES = {
+    "wild": ("Market's looking wild today. Smaller size, same discipline.",
+             "Big swings out here. I'm sizing down and waiting for the real move.",
+             "Choppy seas this morning. Show me a clean break and we ride."),
+    "gap_up": ("Bulls showed up early. Hold {up} and maybe we catch the run.",
+               "Gapped up and feeling frisky. {up} is the level to clear.",
+               "Green open, eyes on {up}. Let's see if it has legs."),
+    "gap_down": ("Bears came in swinging. Lose {down} and I'm short.",
+                 "Rough open. {down} decides if this gets ugly.",
+                 "Red out of the gate, eyes on {down}. Let's see who blinks."),
+    "steady": ("Watching {up} and {down} closely. Here's the rundown:",
+               "Quiet open. I'm not moving until {up} or {down} breaks.",
+               "Patience mode. Give me {up} or {down} and we go."),
+}
+
+
+def morning_text(key: str, sym: str, first_open: float, m: dict, prev: float, reference_usd: float) -> str:
+    """Swing's short card after the first bar. Levels are the 10:00 check's; it changes no trading decision."""
+    day = date.fromisoformat(key)
+    up, down, weight = m["up"][5], m["down"][5], m["weight"]
+    gap = first_open / prev - 1
+    mood = "wild" if weight < .6 else "gap_up" if gap >= .005 else "gap_down" if gap <= -.005 else "steady"
+    options = MORNING_LINES[mood]
+    line = options[day.toordinal() % len(options)].format(up=f"${up:,.2f}", down=f"${down:,.2f}")
+    qty = math.floor(weight * reference_usd / first_open)
+    return (f"🎯 **Swing's rundown · {day:%a %b %d}**\n*{line}*\n\n📈 {sym} long above **${up:,.2f}**\n"
+            f"📉 {sym} short below **${down:,.2f}**\n📦 Size: **{qty:,} shares** (about ${qty * first_open:,.0f}, {weight:.2f}x)\n"
+            "-# Levels are for the 10:00 AM ET check and shift through the day. Between them, I stay flat.")
+
+
 class Routine:
     """One tick of Swing's day. Everything external is passed in, so tests run it on a fake clock and broker."""
 
@@ -300,7 +330,26 @@ class Routine:
             a.step(bar, O, H, L, C)
             b.step(bar, O, H, L, C)
         rec["v11"], rec["v1"], rec["last_close"], rec["done_bar"] = a.to_dict(), b.to_dict(), float(C[k]), k
+        send_morning = not rec.get("morning") and t < session.at(dtime(10, 0))
+        rec["morning"] = rec.get("morning") or send_morning   # saved first, so a restart can't post it twice
         self.state.save()
+        if send_morning:
+            try:
+                self.post("setups", morning_text(key, self.sym, float(O[0]), rec["v11"], rec["context"]["prev"], self.ref), False)
+            except Exception:  # noqa: BLE001 - a card must never get in the way of trading
+                log.warning("couldn't post Swing's morning card", exc_info=True)
+
+    def morning_preview(self, key: str) -> str:
+        """Post a finished day's morning card on request. It reads saved levels only and never touches trading."""
+        rec = self.state.day(key)
+        if not rec or not rec.get("v11"):
+            return f"no levels saved for {key}"
+        got = today_arrays(self.today(date.fromisoformat(key)), 0)
+        if got is None:
+            return f"no opening bar for {key}"
+        text = morning_text(key, self.sym, float(got[0][0]), rec["v11"], rec["context"]["prev"], self.ref)
+        self.post("setups", f"{text}\n-# Preview of this morning's card", False)
+        return "posted the morning card preview"
 
     def target(self, rec: dict, t: datetime, session) -> int:
         if rec.get("skip") or rec.get("halted") or not rec.get("v11") or t.time() >= self.flat_at:
