@@ -24,7 +24,7 @@ import pandas as pd
 
 from app import paths
 from app.settings import _read_json
-from app.strategies.swing import BARS, Machine, context
+from app.strategies.swing import BARS, CHECKS, Machine, context
 
 log = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
@@ -173,36 +173,75 @@ def _usd(x: float) -> str:
     return f"{'+' if x >= 0 else '−'}${abs(x):,.2f}"
 
 
-def live_text(lot: dict, sym: str, px: float | None) -> tuple[str, int]:
-    now = px if px is not None else lot["entry"]
-    pnl = lot["side"] * (now - lot["entry"]) * lot["qty"]
-    pct = lot["side"] * (now / lot["entry"] - 1) * 100
-    name = "LONG" if lot["side"] > 0 else "SHORT"
-    text = (f"🟢 **{sym} {name}** · Swing v1.1 · **{_usd(pnl)}** ({pct:+.2f}%)\n{lot['qty']} sh · in ${lot['entry']:,.2f} at "
-            f"{lot['time']} ET · " + (f"now ${px:,.2f}" if px is not None else "price unavailable")
-            + f"\nEntry: {lot['why']}\nExits: 15m FVG break, 30m band check, or flat by the close.")
-    return text, 0x2ECC71 if pnl >= 0 else 0xE74C3C
+def _t12(hms: str) -> str:
+    """'14:05:12' (ET) -> '2:05 PM'."""
+    h, m = int(hms[:2]), int(hms[3:5])
+    return f"{(h - 1) % 12 + 1}:{m:02d} {'AM' if h < 12 else 'PM'}"
 
 
-def closed_text(t: dict, sym: str) -> tuple[str, int]:
-    icon = "✅" if t["pnl"] > 0 else "❌" if t["pnl"] < 0 else "➖"
-    name = "LONG" if t["side"] > 0 else "SHORT"
-    pct = t["side"] * (t["exit"] / t["entry"] - 1) * 100
-    text = (f"{icon} **{sym} {name}** · Swing v1.1 · **{_usd(t['pnl'])}** ({pct:+.2f}%)\nIn ${t['entry']:,.2f} ({t['time_in']}) → "
-            f"out ${t['exit']:,.2f} ({t['time_out']} ET) · {t['qty']} sh\nExit: {t['why']}")
-    return text, 0x2ECC71 if t["pnl"] > 0 else 0xE74C3C if t["pnl"] < 0 else 0x95A5A6
+def _held(a: str, b: str) -> str:
+    mins = max(0, (int(b[:2]) * 60 + int(b[3:5])) - (int(a[:2]) * 60 + int(a[3:5])))
+    return f"{mins // 60}h {mins % 60}m" if mins >= 60 else f"{mins}m"
+
+
+def exit_levels(rec: dict | None) -> dict:
+    """The levels that would end the open trade: the band at the next 30-minute check and the 15-minute FVG."""
+    m = (rec or {}).get("v11")
+    if not m or not m.get("side"):
+        return {}
+    side, done = m["side"], (rec or {}).get("done_bar", -1)
+    nxt = min((c for c in CHECKS if c > done), default=None)
+    out = {"fvg": m["lo"] if side > 0 else m["hi"]}
+    if nxt is not None:
+        out["band"] = (m["up"] if side > 0 else m["down"])[nxt]
+        t = (9 * 60 + 30) + (nxt + 1) * 5
+        out["check"] = f"{(t // 60 - 1) % 12 + 1}:{t % 60:02d} {'AM' if t < 720 else 'PM'}"
+    return out
+
+
+def live_text(lot: dict, sym: str, px: float | None, rec: dict | None = None,
+              now: datetime | None = None) -> tuple[str, str, int]:
+    """(title, body, color) for the live card: P&L in the title, then the facts and what would end the trade."""
+    side, entry = lot["side"], lot["entry"]
+    name = "LONG" if side > 0 else "SHORT"
+    if px is None:
+        title, pnl = f"⚪ {sym} {name} · price unavailable", 0.0
+    else:
+        pnl = side * (px - entry) * lot["qty"]
+        title = f"{'🟢' if pnl >= 0 else '🔴'} {sym} {name} · {_usd(pnl)} ({side * (px / entry - 1) * 100:+.2f}%)"
+    lines = [f"**{lot['qty']:,} sh** · in **${entry:,.2f}** at {_t12(lot['time'])}"
+             + (f" · now **${px:,.2f}**" if px is not None else "")]
+    lv, block = exit_levels(rec), []
+    ref = px if px is not None else entry
+
+    def away(level):
+        return f"{abs(ref - level) / ref * 100:.2f}% away"
+    if lv.get("band") is not None:
+        block.append(f"Band exit  ${lv['band']:,.2f}  ({away(lv['band'])}, {lv['check']} check)")
+    if lv.get("fvg") is not None:
+        block.append(f"FVG exit   ${lv['fvg']:,.2f}  ({away(lv['fvg'])}, 15m close)")
+    block.append("Flat by    3:58 PM")
+    lines.append("```\n" + "\n".join(block) + "\n```")
+    when = (now or datetime.now(NY)).astimezone(NY)
+    lines.append(f"-# Entry: {lot['why']} · updated {when:%-I:%M %p} ET")
+    return title, "\n".join(lines), 0x2ECC71 if pnl >= 0 else 0xE74C3C
 
 
 def live_ping(lot: dict, sym: str, owner_id: int) -> str:
     """The @mention line on a new live card. It stays fixed while the embed's P&L refreshes."""
-    return f"<@{owner_id}> 🟢 **{sym} {'LONG' if lot['side'] > 0 else 'SHORT'}** · Swing v1.1"
+    return f"<@{owner_id}> 🟢 **{sym} {'LONG' if lot['side'] > 0 else 'SHORT'}** · new trade"
 
 
 def closed_message(t: dict, sym: str, owner_id: int) -> tuple[str, str, int]:
     """(message with the @mention and headline, embed body, color), laid out like Orbi's closed cards."""
-    text, color = closed_text(t, sym)
-    head, body = text.split("\n", 1)
-    return f"<@{owner_id}> {head}", body, color
+    icon = "✅" if t["pnl"] > 0 else "❌" if t["pnl"] < 0 else "➖"
+    name = "LONG" if t["side"] > 0 else "SHORT"
+    pct = t["side"] * (t["exit"] / t["entry"] - 1) * 100
+    head = f"<@{owner_id}> {icon} **{sym} {name}** · **{_usd(t['pnl'])}** ({pct:+.2f}%)"
+    body = (f"**{t['qty']:,} sh** · **${t['entry']:,.2f}** → **${t['exit']:,.2f}**\n"
+            f"{_t12(t['time_in'])} → {_t12(t['time_out'])} ET · held {_held(t['time_in'], t['time_out'])}\n"
+            f"-# Exit: {t['why']}")
+    return head, body, 0x2ECC71 if t["pnl"] > 0 else 0xE74C3C if t["pnl"] < 0 else 0x95A5A6
 
 
 MORNING_LINES = {

@@ -251,11 +251,24 @@ class Pings(unittest.TestCase):
              "time_in": "10:05:00", "time_out": "11:00:00", "why": "back inside the band"}
 
     def test_live_and_closed_cards_mention_the_owner(self):
-        self.assertEqual(L.live_ping({"side": -1}, "QQQ", 7), "<@7> 🟢 **QQQ SHORT** · Swing v1.1")
+        self.assertEqual(L.live_ping({"side": -1}, "QQQ", 7), "<@7> 🟢 **QQQ SHORT** · new trade")
         head_line, body, _ = L.closed_message(self.trade, "QQQ", 7)
-        self.assertTrue(head_line.startswith("<@7> ✅ **QQQ LONG** · Swing v1.1"))
+        self.assertEqual(head_line, "<@7> ✅ **QQQ LONG** · **+$10.00** (+1.00%)")
         self.assertNotIn("<@", body)
         self.assertIn("Exit: back inside the band", body)
+        self.assertIn("10:05 AM → 11:00 AM ET · held 55m", body)
+
+    def test_live_card_shows_pnl_and_the_exit_levels(self):
+        from datetime import datetime
+        lot = {"side": 1, "qty": 120, "entry": 638.10, "time": "10:05:12", "why": "breakout above the band"}
+        rec = {"done_bar": 13, "v11": {"side": 1, "up": [637.0] * 78, "down": [630.0] * 78, "lo": 635.5, "hi": None}}
+        title, body, color = L.live_text(lot, "QQQ", 639.10, rec, datetime(2026, 11, 25, 11, 20, tzinfo=L.NY))
+        self.assertEqual(title, "🟢 QQQ LONG · +$120.00 (+0.16%)")
+        self.assertIn("**120 sh** · in **$638.10** at 10:05 AM · now **$639.10**", body)
+        self.assertIn("Band exit  $637.00", body); self.assertIn("11:00 AM check", body)
+        self.assertIn("FVG exit   $635.50", body); self.assertIn("Flat by    3:58 PM", body)
+        self.assertEqual(color, 0x2ECC71)
+        self.assertEqual(L.live_text(lot, "QQQ", None)[0], "⚪ QQQ LONG · price unavailable")
 
     def test_unping_only_edits_that_days_cards_and_is_repeatable(self):
         import asyncio

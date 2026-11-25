@@ -111,8 +111,8 @@ async def live() -> None:
                     lot = led["open"]
                     if lot and cfg.channel_live_trades:
                         _, px = await asyncio.to_thread(broker.position)
-                        text, color = L.live_text(lot, sym, px)
-                        embed = discord.Embed(description=text, color=color)
+                        title, text, color = L.live_text(lot, sym, px, state.day(lot["day"]))
+                        embed = discord.Embed(title=title, description=text, color=color)
                         ch = await channel(cfg.channel_live_trades)
                         try:
                             if lot.get("card"):
@@ -160,6 +160,16 @@ async def live() -> None:
                             trades = list(state.ledger["closed"])
                         n = await unping_cards(await channel(cfg.channel_closed_trades), trades, c["note"])
                         result = f"took the @mention off {n} card{'' if n == 1 else 's'}"
+                    elif c["command"] == "swing-test-cards":
+                        lot = {"side": 1, "qty": 120, "entry": 638.10, "time": "10:05:12", "why": "breakout above the band (TEST)"}
+                        rec = {"done_bar": 13, "v11": {"side": 1, "up": [637.0] * 78, "down": [630.0] * 78, "lo": 635.5, "hi": None}}
+                        title, text, color = L.live_text(lot, sym, 639.10, rec)
+                        await (await channel(cfg.channel_live_trades)).send(
+                            L.live_ping(lot, sym, cfg.owner_id) + " · TEST", embed=discord.Embed(title=title, description=text + "\n-# TEST card, safe to delete", color=color))
+                        head, body, color = L.closed_message({"side": 1, "qty": 120, "entry": 638.10, "exit": 638.19, "pnl": 11.07, "time_in": "10:05:12",
+                                                              "time_out": "10:40:03", "why": "back inside the band (TEST)"}, sym, cfg.owner_id)
+                        await (await channel(cfg.channel_closed_trades)).send(head + " · TEST", embed=discord.Embed(description=body + "\n-# TEST card, safe to delete", color=color))
+                        result = "posted test cards"
                     elif c["command"] == "swing-morning-preview":
                         async with busy:
                             result = await asyncio.to_thread(routine.morning_preview, c["note"])
