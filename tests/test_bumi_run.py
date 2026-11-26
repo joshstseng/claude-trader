@@ -135,3 +135,24 @@ class Orders(Harness):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DailyRecord(Harness):
+    def test_record_has_the_plan_and_checks_fills_against_the_open(self):
+        got = []
+        r = self.routine(); r.publish = lambda d, x: got.append((d, x)); r.opens = lambda d, syms: {"QLD": 100.0}
+        self.state.doc["days"]["2026-11-19"] = {"mode": "paper", "sent": True, "confirmed": True, "orders": [
+            {"sym": "QLD", "side": "buy", "qty": 10, "filled_qty": 10, "filled_price": 100.05, "client_id": "x", "why": "dip"}]}
+        self.tick(r, at(FRI, 16, 30))
+        d, x = got[-1]
+        self.assertEqual(d, FRI.isoformat())
+        self.assertEqual(x["fills"][0]["slip_bp"], 5.0)
+        self.assertTrue(x["filled_all"])
+        self.assertIn("plan_orders", x)
+
+    def test_no_fills_means_an_empty_list(self):
+        got = []
+        r = self.routine(); r.publish = lambda d, x: got.append(x)
+        self.tick(r, at(FRI, 16, 30))
+        self.assertEqual(got[-1]["fills"], [])
+

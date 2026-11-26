@@ -316,6 +316,34 @@ def chunks(text: str, limit: int = 1900) -> list[str]:
     return out
 
 
+WEEKLY_AT = dtime(17, 0)        # the weekly check: after Swing's 4:05 PM record and Bumi's after-close plan
+
+
+def weekly_plan(trade_log: tradelog.TradeLog, calendar, now: datetime):
+    """(text, details, day) when the weekly check is due and not yet posted, else None."""
+    from app import weekly
+    et = now.astimezone(NY)
+    today = et.date()
+    s = calendar.session(today)
+    if s is None or et.time() < WEEKLY_AT or trade_log.fleet(f"weekly:{today.isoformat()}"):
+        return None
+    year, wk, _ = today.isocalendar()
+    later = [today + timedelta(days=i) for i in range(1, 7)]
+    if any(d.isocalendar()[:2] == (year, wk) and calendar.session(d) is not None for d in later):
+        return None                                        # not the week's last market day
+    monday = today - timedelta(days=today.weekday())
+    days = [monday + timedelta(days=i) for i in range(today.weekday() + 1)]
+    sessions = sum(1 for d in days if calendar.session(d) is not None)
+    span = {d.isoformat() for d in days}
+    sw_all = weekly.records(trade_log.fleet_prefix("daily:swing:"))
+    bu_all = weekly.records(trade_log.fleet_prefix("daily:bumi:"))
+    if not sw_all and not bu_all:
+        return None
+    text, details = weekly.weekly_text(monday, today, [r for r in sw_all if r["day"] in span], sw_all,
+                                       [r for r in bu_all if r["day"] in span], bu_all, sessions)
+    return text, details, today.isoformat()
+
+
 def summary_days(now: datetime, calendar, back: int = 7) -> list[tuple[str, bool]]:
     """Days the fleet summary may be due: today once it's past 4:15 PM ET, and the previous market day
     (catch-up if the head was down). [(day, is_today)]"""
@@ -530,6 +558,20 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
             for text, ping in self.watchdog.check(beats, now, watching(now, session)):
                 await self.post(cfg.channel_system, text, ping=ping)
             await self.summary_if_due(now, session)
+            try:
+                await self.weekly_if_due(now)
+            except Exception:  # noqa: BLE001 - the weekly check never gets in the way of the watchdog
+                log.warning("weekly check failed", exc_info=True)
+
+        async def weekly_if_due(self, now: datetime) -> bool:
+            """On the week's last market day, after WEEKLY_AT, post the paper-vs-model check once."""
+            plan = await asyncio.to_thread(weekly_plan, self.log, self.calendar, now)
+            if plan is None:
+                return False
+            text, details, key = plan
+            await self.post_summary(text, details, key, thread_name="weekly check")
+            await asyncio.to_thread(self.log.set_fleet, f"weekly:{key}", "posted")
+            return True
 
         async def summary_if_due(self, now: datetime, session=None) -> bool:
             """Post each due day's fleet summary once (remembered in the database)."""
@@ -568,7 +610,7 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
             details = [(b, reports[b]) for b in bots if b in reports]
             return summary_text(nums, day, self.log.global_pause(), missing, details=bool(details)), details
 
-        async def post_summary(self, text: str, details: list[tuple[str, str]], day: str) -> None:
+        async def post_summary(self, text: str, details: list[tuple[str, str]], day: str, thread_name: str = "each bot's summary") -> None:
             """The one post in #daily-summary, with each bot's full report in a thread under it."""
             await self.ready.wait()
             ch = self.get_channel(cfg.channel_daily_summary)
@@ -579,14 +621,14 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 return
             target = ch
             try:
-                target = await msg.create_thread(name=f"{date.fromisoformat(day):{DAY_FMT}} · each bot's summary",
+                target = await msg.create_thread(name=f"{date.fromisoformat(day):{DAY_FMT}} · {thread_name}",
                                                  auto_archive_duration=1440)
             except discord.HTTPException as e:
                 await self.post(cfg.channel_system, "⚠️ Couldn't open the daily summary's thread (the head bot needs "
                                 f"**Create Public Threads** and **Send Messages in Threads**): {str(e)[:120]}. "
                                 "Posted the details in the channel instead.")
             for bot, report in details:
-                for part in chunks(f"**{bot_name(bot)}**\n{report}"):
+                for part in chunks(f"**{bot_name(bot) if bot.islower() else bot}**\n{report}"):
                     await target.send(part)
 
         async def run_loop(self) -> None:

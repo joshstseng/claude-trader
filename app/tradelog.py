@@ -286,6 +286,11 @@ class TradeLog:
         r = self.db.execute("SELECT value FROM fleet_settings WHERE key = ?", (key,)).fetchone()
         return r["value"] if r else None
 
+    def fleet_prefix(self, prefix: str) -> list[tuple[str, str]]:
+        """Every (key, value) whose key starts with prefix, oldest key first (e.g. "daily:swing:")."""
+        rows = self.db.execute("SELECT key, value FROM fleet_settings WHERE key LIKE ? ORDER BY key", (prefix + "%",)).fetchall()
+        return [(r["key"], r["value"]) for r in rows]
+
     def global_pause(self) -> bool:
         """The head bot's pause for every bot (on top of each bot's own /pause)."""
         return (self.fleet("global_pause") or "") == "on"

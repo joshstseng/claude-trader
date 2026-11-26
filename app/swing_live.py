@@ -316,8 +316,9 @@ def morning_text(key: str, sym: str, first_open: float, m: dict, prev: float, re
 class Routine:
     """One tick of Swing's day. Everything external is passed in, so tests run it on a fake clock and broker."""
 
-    def __init__(self, s, state, calendar, broker, history, today, post, report, paused, run_mode):
+    def __init__(self, s, state, calendar, broker, history, today, post, report, paused, run_mode, publish=None):
         self.s, self.state, self.cal, self.broker, self.history, self.today = s, state, calendar, broker, history, today
+        self.publish = publish                            # publish(day, dict): the daily record Uri's weekly check reads
         self.post, self.report, self.paused, self.mode = post, report, paused, run_mode
         self.sym = s["symbol"]
         self.flat_at = dtime.fromisoformat(s["flat_at"])
@@ -515,11 +516,13 @@ class Routine:
             if self.paused():
                 rec["missed"] = m["signal_bar"]
                 self.state.save()
+                rec["skips"] = rec.get("skips", 0) + 1
                 self.post("system", "⏸️ Swing v1.1 is paused, so it skipped a new entry.", False)
                 return
             if rec.get("done_bar", -1) - m["signal_bar"] > 1:
                 rec["missed"] = m["signal_bar"]
                 self.state.save()
+                rec["skips"] = rec.get("skips", 0) + 1
                 self.post("system", "⏭️ Swing v1.1 skipped an entry because the signal was more than one bar old.", True)
                 return
             qty = math.floor(m["weight"] * self.ref / rec["last_close"])
@@ -734,6 +737,13 @@ class Routine:
         if rec.get("skip"):
             rec["summary"] = True
             self.state.save()
+            if self.publish is not None:
+                try:
+                    self.publish(key, {"day": key, "mode": self.mode, "off": rec["skip"], "paper_pnl": 0.0, "paper_trades": 0,
+                                       "model_pnl": 0.0, "model_trades": 0, "v1_pnl": 0.0, "v1_trades": 0, "fills": [],
+                                       "flat_after_close": None, "halt_why": None, "skips": 0, "outages": 0})
+                except Exception:  # noqa: BLE001
+                    log.warning("couldn't publish the daily record", exc_info=True)
             return
         if rec.get("v11") and rec["v11"]["next_bar"] < BARS and t.time() < dtime(16, 20):
             return
@@ -750,6 +760,37 @@ class Routine:
             self.state.save()
         except Exception:  # noqa: BLE001
             log.warning("couldn't post the daily summary", exc_info=True)
+        if self.publish is not None:
+            try:
+                self.publish(key, self.daily_record(rec, key, paper, len(day), m11, m1))
+            except Exception:  # noqa: BLE001 - the weekly check must never get in the way of trading
+                log.warning("couldn't publish the daily record", exc_info=True)
+
+    def daily_record(self, rec: dict, key: str, paper: float, closed: int, m11: dict, m1: dict) -> dict:
+        """Paper vs model for Uri's weekly check. Each fill is compared with the open of the 5-minute bar it filled in,
+        which is the price the model assumes (a decision on bar b fills at bar b+1's open)."""
+        fills, O = [], None
+        try:
+            got = today_arrays(self.today(date.fromisoformat(key)), BARS - 1)
+            O = got[0] if got else None
+        except Exception:  # noqa: BLE001
+            log.warning("no bars for the fill check", exc_info=True)
+        for f in (x for x in self.state.ledger["fills"] if x["day"] == key):
+            k = (int(f["time"][:2]) * 60 + int(f["time"][3:5]) - 570) // 5
+            ref = float(O[k]) if O is not None and 0 <= k < BARS else None
+            slip = ((f["price"] - ref) / ref * 1e4 * (1 if f["side"] == "buy" else -1)) if ref else None
+            fills.append({**f, "model_px": ref, "slip_bp": round(slip, 2) if slip is not None else None})
+        flat = None
+        if self.mode == "paper":
+            try:
+                flat = self.broker.position()[0] == 0
+            except Exception:  # noqa: BLE001
+                pass
+        return {"day": key, "mode": self.mode, "paper_pnl": round(paper, 2), "paper_trades": closed,
+                "model_pnl": round(m11["pnl"] * self.ref, 2), "model_trades": m11["trades"],
+                "v1_pnl": round(m1["pnl"] * self.ref, 2), "v1_trades": m1["trades"], "fills": fills,
+                "flat_after_close": flat, "halt_why": rec.get("halt_why"), "skips": rec.get("skips", 0),
+                "outages": rec.get("outages", 0), "off": rec.get("skip")}
 
     def flatten(self, today: str) -> str:
         """The kill switch: stop today's trading, cancel orders and close Swing's own account."""

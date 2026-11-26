@@ -78,8 +78,9 @@ def plan_text(rec: dict, held: dict[str, int] | None) -> str:
 class Routine:
     """One tick of Bumi's day. Everything external is passed in, so tests run it on a fake clock and broker."""
 
-    def __init__(self, s, state, calendar, broker, fetch, post, report, paused, run_mode):
+    def __init__(self, s, state, calendar, broker, fetch, post, report, paused, run_mode, publish=None, opens=None):
         self.s, self.state, self.cal, self.broker = s, state, calendar, broker
+        self.publish, self.opens = publish, opens          # Uri's weekly check: publish(day, dict); opens(day, syms) -> {sym: open}
         self.fetch, self.post, self.report, self.paused, self.mode = fetch, post, report, paused, run_mode
         self.retry_at: datetime | None = None
         self.warned: set[str] = set()
@@ -139,6 +140,11 @@ class Routine:
             rec = await asyncio.to_thread(L.decide, plan, self.s, self.state, closes, self.mode, self.broker)
             self.retry_at = None
             await self.post("setups", plan_text(rec, await asyncio.to_thread(self.holdings)), False)
+            if self.publish is not None:
+                try:
+                    await asyncio.to_thread(self.publish, key, await asyncio.to_thread(self.daily_record, day, rec))
+                except Exception:  # noqa: BLE001 - the weekly check must never get in the way of trading
+                    log.warning("couldn't publish the daily record", exc_info=True)
         except Exception as e:  # noqa: BLE001 - no plan means no orders; keep retrying and say so once
             log.exception("couldn't decide for %s", key)
             self.retry_at = now + timedelta(seconds=RETRY_S)
@@ -146,6 +152,28 @@ class Routine:
                 self.warned.add(key)
                 await self.post("system", f"⚠️ **Bumi has no plan for {key}** ({type(e).__name__}). No orders will be "
                                 "sent until it can read final prices. Still retrying.", True)
+
+    def daily_record(self, day: date, rec: dict) -> dict:
+        """Today's plan, plus this morning's opening fills checked against the official open (final after the close)."""
+        prev = prev_session(self.cal, day)
+        before = self.state.day(prev.isoformat()) if prev else None
+        orders = [o for o in (before or {}).get("orders", []) if o.get("filled_price")]
+        opens = {}
+        if orders and self.opens is not None:
+            try:
+                opens = self.opens(day, sorted({o["sym"] for o in orders}))
+            except Exception:  # noqa: BLE001
+                log.warning("no opening prices for the fill check", exc_info=True)
+        fills = []
+        for o in orders:
+            op = opens.get(o["sym"])
+            slip = ((o["filled_price"] - op) / op * 1e4 * (1 if o["side"] == "buy" else -1)) if op else None
+            fills.append({"sym": o["sym"], "side": o["side"], "qty": o["filled_qty"], "price": o["filled_price"], "open": op,
+                          "slip_bp": round(slip, 2) if slip is not None else None})
+        planned = (before or {}).get("orders", [])
+        return {"day": day.isoformat(), "mode": self.mode, "plan_orders": len(rec["orders"]), "vix": rec["plan"]["vix"],
+                "calm": rec["plan"]["calm"], "fills": fills,
+                "filled_all": all(o.get("filled_qty") == o["qty"] for o in planned) if planned and (before or {}).get("sent") else None}
 
     async def send(self, key: str, now: datetime, rec: dict) -> None:
         paused = await asyncio.to_thread(self.paused)
@@ -215,8 +243,18 @@ async def live() -> None:
         ch = client.get_channel(channels[where]) or await client.fetch_channel(channels[where])
         await ch.send((f"<@{cfg.owner_id}> " if ping else "") + text[:1900])
 
+    def opens(day: date, syms: list[str]) -> dict[str, float]:
+        from alpaca.data.enums import Adjustment, DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+        got = data_client.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=syms, timeframe=TimeFrame.Day, feed=DataFeed.SIP, adjustment=Adjustment.RAW,
+            start=datetime.combine(day, dtime(0), tzinfo=NY), end=datetime.now(timezone.utc) - timedelta(minutes=20))).data
+        return {u: float(b[0].open) for u, b in got.items() if b and b[0].timestamp.astimezone(NY).date() == day}
+
     routine = Routine(s, state, calendar, broker, lambda d, n: fetch_inputs(data_client, s, d, n), post,
-                      lambda d, t: db.save_report("bumi", d, t), db.global_pause, run_mode)
+                      lambda d, t: db.save_report("bumi", d, t), db.global_pause, run_mode,
+                      publish=lambda d, x: db.set_fleet(f"daily:bumi:{d}", json.dumps(x)), opens=opens)
 
     live_cards = BumiCards(state, broker, lambda c: client.get_channel(c) or client.fetch_channel(c),
                            cfg.channel_live_trades, cfg.channel_closed_trades)

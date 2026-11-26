@@ -84,7 +84,7 @@ async def live() -> None:
         return bar_rows(data, sym, datetime.combine(day, dtime(9, 30), tzinfo=NY), None, DataFeed.IEX)   # real-time feed
 
     routine = L.Routine(s, state, calendar, broker, history, today, post, lambda d, t: db.save_report("swing", d, t),
-                        db.global_pause, run_mode)
+                        db.global_pause, run_mode, publish=lambda d, x: db.set_fleet(f"daily:swing:{d}", json.dumps(x)))
 
     async def channel(cid):
         return client.get_channel(cid) or await client.fetch_channel(cid)

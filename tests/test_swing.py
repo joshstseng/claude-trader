@@ -353,6 +353,26 @@ class Safety(Live):
         self.assertTrue(any("reachable again" in x for x in self.posts))
 
 
+class DailyRecord(Live):
+    def test_record_compares_each_fill_with_the_models_price(self):
+        got = []
+        r = self.routine(); r.publish = lambda d, x: got.append((d, x))
+        self.at(r, 9, 1); self.force(r); self.at(r, 10, 0); self.at(r, 10, 0, 10)
+        self.at(r, 15, 58, 50); self.at(r, 15, 58, 55); self.at(r, 16, 6)
+        self.assertEqual(len(got), 1)
+        d, x = got[0]
+        self.assertEqual(d, DAY.isoformat())
+        self.assertEqual((x["paper_trades"], x["flat_after_close"], x["halt_why"]), (1, True, None))
+        self.assertEqual([f["side"] for f in x["fills"]], ["buy", "sell"])
+        self.assertTrue(all(f["model_px"] and f["slip_bp"] is not None for f in x["fills"]))
+
+    def test_shortened_day_publishes_an_off_record(self):
+        got = []
+        r = self.routine(cal=Cal(dtime(13, 0))); r.publish = lambda d, x: got.append(x)
+        self.at(r, 9, 1); self.at(r, 16, 6)
+        self.assertEqual(got[0]["off"], "shortened session")
+
+
 class Pings(unittest.TestCase):
     trade = {"day": "2026-11-23", "side": 1, "qty": 10, "entry": 100.0, "exit": 101.0, "pnl": 10.0,
              "time_in": "10:05:00", "time_out": "11:00:00", "why": "back inside the band"}
