@@ -13,7 +13,9 @@ Safety nets (config "risk"; none triggered in the 2016-Oct 2026 backtest, so nor
     daily loss limit   realized + open P&L at -3% of the base: flat and done for the day
     position cap       never more than 2x the base; a bigger position is closed and the day halted
     backup close-out   3:59:30 PM: anything still open is closed; after the close, a held position pings you
-    disconnect rule    3 minutes without live bars while in a trade: exit; no entries until data is back; 3 outages = done
+    disconnect rule    no live bars (the feed fails, or answers but stops sending bars for 10 minutes): @mention alert with a
+                       Close-now button; a trade is closed automatically 3 minutes later; no entries until bars return;
+                       3 outages = done for the day
 """
 
 from __future__ import annotations
@@ -316,9 +318,10 @@ def morning_text(key: str, sym: str, first_open: float, m: dict, prev: float, re
 class Routine:
     """One tick of Swing's day. Everything external is passed in, so tests run it on a fake clock and broker."""
 
-    def __init__(self, s, state, calendar, broker, history, today, post, report, paused, run_mode, publish=None):
+    def __init__(self, s, state, calendar, broker, history, today, post, report, paused, run_mode, publish=None, alert=None):
         self.s, self.state, self.cal, self.broker, self.history, self.today = s, state, calendar, broker, history, today
         self.publish = publish                            # publish(day, dict): the daily record Uri's weekly check reads
+        self.alert = alert                                # alert(text, close_button, day): an @mention, optionally with Close now
         self.post, self.report, self.paused, self.mode = post, report, paused, run_mode
         self.sym = s["symbol"]
         self.flat_at = dtime.fromisoformat(s["flat_at"])
@@ -395,18 +398,19 @@ class Routine:
             rows = self.today(t.date())
         except Exception as e:  # noqa: BLE001
             log.warning("today's bars failed: %s", e)
-            self.note_outage(rec, key, t)
-            self.warn_once(f"{key}:data", f"⚠️ **Swing v1.1 can't read live bars** ({type(e).__name__}). No new entries until they're back; "
-                           f"an open trade is closed after {int(self.risk.get('blind_after_s', 180)) // 60} minutes without them.")
+            self.start_outage(rec, key, t, "aren't loading", f"Swing can't reach the live data feed ({type(e).__name__})")
             return
+        ks = [(x.astimezone(NY).hour * 60 + x.astimezone(NY).minute - 570) // 5 for x, *_ in rows]
+        have, newest = k in ks, max(ks, default=-1)
+        if not have:
+            if t < session.at(session.open) + timedelta(seconds=(k + 1) * 300 + MISSING_BAR_WAIT_S):
+                return
+            if newest < k - 1:                            # 2+ bars missing: frozen, even though the feed answers
+                self.start_outage(rec, key, t, "stopped loading", f"No new 5-minute {self.sym} bar for {(k - newest) * 5} minutes, "
+                                  "though the data feed is still answering")
+                return
         if rec.get("blind_since"):
-            rec["blind_since"], rec["blind_exit"] = None, False
-            self.state.save()
-            self.warned.discard(f"{key}:data")
-            self.post("system", "✅ **Swing v1.1:** live bars are back. New entries resume at the next signal.", False)
-        have = any((x.astimezone(NY).hour * 60 + x.astimezone(NY).minute - 570) // 5 == k for x, *_ in rows)
-        if not have and t < session.at(session.open) + timedelta(seconds=(k + 1) * 300 + MISSING_BAR_WAIT_S):
-            return
+            self.end_outage(rec, key)
         got = today_arrays(rows, k)
         if got is None:
             return
@@ -494,12 +498,13 @@ class Routine:
         if self.backup_close(rec, key, t, session, pos):
             return
         blind = self.blind_for(rec, t)
-        if pos and blind is not None and blind >= self.risk.get("blind_after_s", 180) and not rec.get("blind_exit"):
-            rec["blind_exit"] = True
+        mine = bool(rec.get("close_now")) and blind is not None
+        if pos and blind is not None and (mine or blind >= self.risk.get("blind_after_s", 180)) and not rec.get("blind_exit"):
+            rec["blind_exit"], rec["closed_by_you"] = True, mine
             rec["missed"] = (rec.get("v11") or {}).get("signal_bar", -1)   # don't re-enter the same signal when data returns
             self.state.save()
-            self.post("system", f"🛑 **Swing v1.1:** no live bars for {int(blind // 60)} minutes while in a trade, so it's closing the "
-                      f"{self.sym} position. New entries resume when data is back.", True)
+            self.post("system", f"🛑 **Swing:** closing the {self.sym} position now: " + ("you pressed **Close now**." if mine else
+                      f"still no live bars after {int(blind // 60)} minutes.") + " New trades resume when bars are back.", False)
         want = self.target(rec, t, session)
         if pos and (want == 0 or (pos > 0) != (want > 0)):
             why = (rec.get("v11") or {}).get("why") or "flat"
@@ -508,7 +513,7 @@ class Routine:
             elif rec.get("halted"):
                 why = rec.get("halt_why") or "flatten"
             elif rec.get("blind_exit"):
-                why = "data outage"
+                why = "data outage (closed by you)" if rec.get("closed_by_you") else "data outage"
             if not self.clear_stop(rec, key, t):
                 return                                    # the stop must be gone (or filled) before the exit order
             self.send(rec, key, t, "sell" if pos > 0 else "buy", abs(pos), "exit", why)
@@ -641,6 +646,45 @@ class Routine:
                       "so it closed everything.", True)
             return True
         return False
+
+    def start_outage(self, rec: dict, key: str, t: datetime, verb: str, detail: str) -> None:
+        """A new data outage: count it, then one @mention saying what's wrong and what Swing will do."""
+        if rec.get("blind_since"):
+            return
+        self.note_outage(rec, key, t)
+        lot, st = self.state.ledger["open"], self.state.ledger.get("stop")
+        mins = int(self.risk.get("blind_after_s", 180)) // 60
+        text = f"🛑 **Swing: live price bars {verb}.** {detail}."
+        if lot and self.mode == "paper":
+            text += (f"\n**In a trade:** {'long' if lot['side'] > 0 else 'short'} {lot['qty']} {self.sym} · **closing automatically in "
+                     f"{mins} minutes** unless bars come back.\nNo new trades until bars return."
+                     + (f" The emergency stop at ${st['price']:,.2f} is still in place." if st else ""))
+        else:
+            text += "\nNot in a trade, so there's nothing to close. No new trades until bars return."
+        button = bool(lot) and self.mode == "paper"
+        try:
+            if self.alert is not None:
+                self.alert(text, button, key)
+            else:
+                self.post("system", text, True)
+        except Exception:  # noqa: BLE001 - the alert must never stop the safety net itself
+            log.warning("couldn't post the outage alert", exc_info=True)
+
+    def end_outage(self, rec: dict, key: str) -> None:
+        rec["blind_since"], rec["blind_exit"], rec["close_now"] = None, False, False
+        self.state.save()
+        self.post("system", "✅ **Swing:** bars are loading again. New trades resume at the next signal.", False)
+
+    def request_close(self, key: str) -> str:
+        """The Close now button: exit at once instead of waiting out the outage timer."""
+        rec = self.state.day(key)
+        if not rec or not rec.get("blind_since"):
+            return "Bars are loading again, so Swing is managing its trade normally. Nothing to do."
+        if not self.state.ledger["open"]:
+            return "Swing isn't in a trade anymore, so there's nothing to close."
+        rec["close_now"] = True
+        self.state.save()
+        return "Closing now. Swing will confirm in #system."
 
     def note_outage(self, rec: dict, key: str, t: datetime) -> None:
         if rec.get("blind_since"):

@@ -75,6 +75,34 @@ async def live() -> None:
     def post(where: str, text: str, ping: bool) -> None:      # the routine runs in a worker thread
         asyncio.run_coroutine_threadsafe(post_async(where, text, ping), loop).result(timeout=20)
 
+    async def alert_async(text: str, close_button: bool, day: str) -> None:
+        await ready.wait()
+        ch = client.get_channel(cfg.channel_system) or await client.fetch_channel(cfg.channel_system)
+        view = None
+        if close_button:
+            view = discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(label="Close now", style=discord.ButtonStyle.danger, custom_id=f"swing:close-now:{day}"))
+        await ch.send(f"<@{cfg.owner_id}> {text}"[:1990], view=view)
+
+    def alert(text: str, close_button: bool, day: str) -> None:
+        asyncio.run_coroutine_threadsafe(alert_async(text, close_button, day), loop).result(timeout=20)
+
+    @client.event
+    async def on_interaction(interaction: discord.Interaction):
+        cid = (interaction.data or {}).get("custom_id", "") if interaction.type == discord.InteractionType.component else ""
+        if not cid.startswith("swing:close-now:"):
+            return
+        if interaction.user.id != cfg.owner_id:
+            await interaction.response.send_message("Only the owner can do that.", ephemeral=True)
+            return
+        async with busy:
+            result = await asyncio.to_thread(routine.request_close, cid.rsplit(":", 1)[1])
+        await interaction.response.send_message(result, ephemeral=True)
+        try:
+            await interaction.message.edit(view=None)
+        except Exception:  # noqa: BLE001
+            pass
+
     def history(day: date):
         start = datetime.combine(day - timedelta(days=280), dtime(0), tzinfo=NY)
         end = datetime.combine(day, dtime(0), tzinfo=NY)            # prior sessions only, so SIP's delay doesn't matter
@@ -84,7 +112,7 @@ async def live() -> None:
         return bar_rows(data, sym, datetime.combine(day, dtime(9, 30), tzinfo=NY), None, DataFeed.IEX)   # real-time feed
 
     routine = L.Routine(s, state, calendar, broker, history, today, post, lambda d, t: db.save_report("swing", d, t),
-                        db.global_pause, run_mode, publish=lambda d, x: db.set_fleet(f"daily:swing:{d}", json.dumps(x)))
+                        db.global_pause, run_mode, publish=lambda d, x: db.set_fleet(f"daily:swing:{d}", json.dumps(x)), alert=alert)
 
     async def channel(cid):
         return client.get_channel(cid) or await client.fetch_channel(cid)

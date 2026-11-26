@@ -330,7 +330,7 @@ class Safety(Live):
         n = len(self.broker.sent); self.at(r, 10, 30, 5)
         self.assertEqual(len(self.broker.sent), n)                      # no entries while blind
         r.today = good; self.at(r, 10, 31)
-        self.assertTrue(any("live bars are back" in x for x in self.posts))
+        self.assertTrue(any("bars are loading again" in x for x in self.posts))
         self.assertFalse(self.state.day(DAY.isoformat()).get("blind_exit"))
 
     def test_three_outages_end_the_day(self):
@@ -351,6 +351,73 @@ class Safety(Live):
         self.assertEqual(len(self.broker.live_stops()), 1)
         self.broker.down = False; self.at(r, 10, 4)
         self.assertTrue(any("reachable again" in x for x in self.posts))
+
+
+class FrozenFeed(Live):
+    """The feed answers but stops sending bars: same disconnect rule, one @mention with Close now when in a trade."""
+
+    def entered(self):
+        r = self.routine(); self.alerts = []
+        r.alert = lambda text, button, day: self.alerts.append((text, button, day))
+        self.at(r, 9, 1); self.force(r); self.at(r, 10, 0); self.at(r, 10, 0, 10); self.at(r, 10, 0, 20)
+        self.assertEqual(self.broker.pos, 990)
+        return r
+
+    def freeze(self, r, through):
+        good = r.today
+        r.today = lambda d: [x for x in good(d) if (x[0].astimezone(NY).hour * 60 + x[0].astimezone(NY).minute - 570) // 5 <= through]
+        return good
+
+    def test_frozen_bars_alert_then_close_after_three_minutes(self):
+        r = self.entered(); good = self.freeze(r, 6)                     # last real bar closes 10:05
+        self.at(r, 10, 10, 50)                                          # one bar late: filled in, no alert
+        self.assertEqual(self.alerts, [])
+        self.at(r, 10, 15, 50)                                          # two bars missing: frozen
+        self.assertEqual(len(self.alerts), 1)
+        text, button, day = self.alerts[0]
+        self.assertIn("live price bars stopped loading", text); self.assertIn("still answering", text)
+        self.assertIn("long 990 QQQ · **closing automatically in 3 minutes**", text)
+        self.assertIn("emergency stop at $", text)
+        self.assertTrue(button); self.assertEqual(day, DAY.isoformat())
+        self.at(r, 10, 17, 0); self.assertEqual(self.broker.pos, 990)  # still inside the 3 minutes
+        self.at(r, 10, 19, 0); self.at(r, 10, 19, 5)
+        self.assertEqual(self.broker.pos, 0)
+        self.assertEqual(self.state.ledger["closed"][-1]["why"], "data outage")
+        self.assertEqual(len(self.alerts), 1)                           # one alert per outage
+        r.today = good; self.at(r, 10, 31)
+        self.assertTrue(any("bars are loading again" in x for x in self.posts))
+
+    def test_close_now_exits_at_once(self):
+        r = self.entered(); self.freeze(r, 6); self.at(r, 10, 15, 50)
+        self.assertEqual(r.request_close(DAY.isoformat()), "Closing now. Swing will confirm in #system.")
+        self.at(r, 10, 15, 55); self.at(r, 10, 16, 0)
+        self.assertEqual(self.broker.pos, 0)
+        self.assertEqual(self.state.ledger["closed"][-1]["why"], "data outage (closed by you)")
+        self.assertIn("nothing to close", r.request_close(DAY.isoformat()))
+
+    def test_close_now_after_bars_return_does_nothing(self):
+        r = self.entered()
+        self.assertIn("Nothing to do", r.request_close(DAY.isoformat()))
+
+    def test_not_in_a_trade_no_button(self):
+        r = self.routine(); self.alerts = []
+        r.alert = lambda text, button, day: self.alerts.append((text, button, day))
+        self.at(r, 9, 1); self.force(r)
+        self.points = {}                                                # no breakout, so no trade
+        self.freeze(r, 6); self.at(r, 10, 15, 50)
+        text, button, _ = self.alerts[0]
+        self.assertIn("Not in a trade, so there's nothing to close", text)
+        self.assertFalse(button)
+
+    def test_feed_errors_use_the_same_alert(self):
+        r = self.entered()
+
+        def down(d):
+            raise ConnectionError("feed down")
+        r.today = down; self.at(r, 10, 5, 5)
+        text, button, _ = self.alerts[0]
+        self.assertIn("live price bars aren't loading", text); self.assertIn("can't reach the live data feed (ConnectionError)", text)
+        self.assertTrue(button)
 
 
 class DailyRecord(Live):
