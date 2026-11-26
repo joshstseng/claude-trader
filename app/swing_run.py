@@ -192,6 +192,14 @@ async def live() -> None:
         equity = await asyncio.to_thread(broker.equity)
         await post_async("system", f"🟢 **Swing v1.1 online** · {'**paper orders on**' if run_mode == 'paper' else '👻 shadow, no orders'}"
                          f" · account ${equity:,.0f}", False)
+        try:
+            have = {k.rsplit(":", 1)[1] for k, _ in await asyncio.to_thread(db.fleet_prefix, "daily:swing:")}
+            async with busy:
+                n = await asyncio.to_thread(routine.backfill, have)
+            if n:
+                log.info("published %d missing daily records", n)
+        except Exception:  # noqa: BLE001 - the journal must never stop the bot
+            log.warning("daily record backfill failed", exc_info=True)
         tasks = [asyncio.create_task(x()) for x in (ticks, beats, commands, cards)]
         try:
             await bot

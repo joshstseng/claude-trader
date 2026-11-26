@@ -365,6 +365,23 @@ class DailyRecord(Live):
         self.assertEqual((x["paper_trades"], x["flat_after_close"], x["halt_why"]), (1, True, None))
         self.assertEqual([f["side"] for f in x["fills"]], ["buy", "sell"])
         self.assertTrue(all(f["model_px"] and f["slip_bp"] is not None for f in x["fills"]))
+        self.assertEqual(len(x["trades"]), 1)
+        self.assertEqual((x["symbol"], x["trades"][0]["side"]), ("QQQ", 1))
+
+    def test_backfill_publishes_only_missing_finished_days(self):
+        got = []
+        r = self.routine(); self.at(r, 9, 1); self.force(r); self.at(r, 10, 0); self.at(r, 10, 0, 10)
+        self.at(r, 15, 58, 50); self.at(r, 15, 58, 55); self.at(r, 16, 6)               # no publisher yet: nothing saved
+        r.publish = lambda d, x: got.append(d)
+        self.assertEqual(r.backfill(set()), 1)
+        self.assertEqual(got, [DAY.isoformat()])
+        self.assertEqual(r.backfill({DAY.isoformat()}), 1 - 1)
+
+    def test_day_rows_keep_only_that_day(self):
+        r = self.routine(); self.now = datetime(DAY.year, DAY.month, DAY.day, 16, 30, tzinfo=NY)
+        later = [(t + timedelta(days=1), *x) for t, *x in rows_for(self.points, 77)]
+        r.today = lambda d: rows_for(self.points, 77) + later
+        self.assertEqual(len(r.day_rows(DAY.isoformat())), 78)
 
     def test_shortened_day_publishes_an_off_record(self):
         got = []

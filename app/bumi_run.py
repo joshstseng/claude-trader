@@ -213,9 +213,11 @@ class Routine:
             op = opens.get(o["sym"])
             slip = ((o["filled_price"] - op) / op * 1e4 * (1 if o["side"] == "buy" else -1)) if op else None
             fills.append({"sym": o["sym"], "side": o["side"], "qty": o["filled_qty"], "price": o["filled_price"], "open": op,
-                          "slip_bp": round(slip, 2) if slip is not None else None})
+                          "slip_bp": round(slip, 2) if slip is not None else None, "why": o.get("why")})
         planned = (before or {}).get("orders", [])
-        return {"day": day.isoformat(), "mode": self.mode, "plan_orders": len(rec["orders"]), "vix": rec["plan"]["vix"],
+        trades = [{k: t.get(k) for k in ("sym", "qty", "entry", "exit", "pnl", "day_in", "day_out", "kind", "why")}
+                  for t in self.state.ledger["closed"] if t["day_out"] == day.isoformat()]
+        return {"day": day.isoformat(), "mode": self.mode, "trades": trades, "plan_orders": len(rec["orders"]), "vix": rec["plan"]["vix"],
                 "calm": rec["plan"]["calm"], "fills": fills,
                 "filled_all": all(o.get("filled_qty") == o["qty"] for o in planned) if planned and (before or {}).get("sent") else None}
 

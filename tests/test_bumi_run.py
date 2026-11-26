@@ -149,6 +149,9 @@ class DailyRecord(Harness):
         self.assertEqual(x["fills"][0]["slip_bp"], 5.0)
         self.assertTrue(x["filled_all"])
         self.assertIn("plan_orders", x)
+        self.state.ledger["closed"].append({"sym": "QLD", "qty": 10, "entry": 95.0, "exit": 100.0, "pnl": 50.0, "day_in": "2026-11-10",
+                                            "day_out": FRI.isoformat(), "kind": "dip", "why": "stop"})
+        self.assertEqual(r.daily_record(FRI, self.state.day(FRI.isoformat()))["trades"][0]["pnl"], 50.0)
 
     def test_no_fills_means_an_empty_list(self):
         got = []

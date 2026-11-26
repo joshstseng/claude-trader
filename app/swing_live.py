@@ -428,12 +428,17 @@ class Routine:
             except Exception:  # noqa: BLE001 - a card must never get in the way of trading
                 log.warning("couldn't post Swing's morning card", exc_info=True)
 
+    def day_rows(self, key: str):
+        """That day's bars only (fetching a past day returns every day since)."""
+        d = date.fromisoformat(key)
+        return [x for x in self.today(d) if x[0].astimezone(NY).date() == d]
+
     def morning_preview(self, key: str) -> str:
         """Post a finished day's morning card on request. It reads saved levels only and never touches trading."""
         rec = self.state.day(key)
         if not rec or not rec.get("v11"):
             return f"no levels saved for {key}"
-        got = today_arrays(self.today(date.fromisoformat(key)), 0)
+        got = today_arrays(self.day_rows(key), 0)
         if got is None:
             return f"no opening bar for {key}"
         text = morning_text(key, self.sym, float(got[0][0]), rec["v11"], rec["context"]["prev"], self.ref)
@@ -771,7 +776,7 @@ class Routine:
         which is the price the model assumes (a decision on bar b fills at bar b+1's open)."""
         fills, O = [], None
         try:
-            got = today_arrays(self.today(date.fromisoformat(key)), BARS - 1)
+            got = today_arrays(self.day_rows(key), BARS - 1)
             O = got[0] if got else None
         except Exception:  # noqa: BLE001
             log.warning("no bars for the fill check", exc_info=True)
@@ -786,11 +791,27 @@ class Routine:
                 flat = self.broker.position()[0] == 0
             except Exception:  # noqa: BLE001
                 pass
-        return {"day": key, "mode": self.mode, "paper_pnl": round(paper, 2), "paper_trades": closed,
+        trades = [{k: t[k] for k in ("side", "qty", "entry", "exit", "pnl", "time_in", "time_out", "why")}
+                  for t in self.state.ledger["closed"] if t["day"] == key]
+        return {"day": key, "mode": self.mode, "symbol": self.sym, "trades": trades, "paper_pnl": round(paper, 2), "paper_trades": closed,
                 "model_pnl": round(m11["pnl"] * self.ref, 2), "model_trades": m11["trades"],
                 "v1_pnl": round(m1["pnl"] * self.ref, 2), "v1_trades": m1["trades"], "fills": fills,
                 "flat_after_close": flat, "halt_why": rec.get("halt_why"), "skips": rec.get("skips", 0),
                 "outages": rec.get("outages", 0), "off": rec.get("skip")}
+
+    def backfill(self, have: set[str]) -> int:
+        """Publish daily records for finished days that don't have one yet (e.g. before the journal existed)."""
+        if self.publish is None:
+            return 0
+        n = 0
+        for key, rec in sorted(self.state.doc["days"].items()):
+            if key in have or not rec.get("summary") or rec.get("skip"):
+                continue
+            day = [x for x in self.state.ledger["closed"] if x["day"] == key]
+            m11, m1 = rec.get("v11") or {"pnl": 0, "trades": 0}, rec.get("v1") or {"pnl": 0, "trades": 0}
+            self.publish(key, self.daily_record(rec, key, sum(x["pnl"] for x in day), len(day), m11, m1))
+            n += 1
+        return n
 
     def flatten(self, today: str) -> str:
         """The kill switch: stop today's trading, cancel orders and close Swing's own account."""

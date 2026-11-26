@@ -13,6 +13,7 @@ What it does:
     /resume-all     lifts it (a bot's own /pause stays as it was)
     /flatten-all    global pause + a "flatten" command in the shared database; each bot closes its own
     /pause-bumi, /resume-bumi, /flatten-bumi   Bumi-only controls through the same commands table
+    /journal        every bot's paper trades and fills as two CSV files (app/journal.py)
                     account with its own keys and answers; the head reports who did what
     #live-trades    while no bot has a trade open, one light "no live trades" message (a new line each
                     time); deleted within seconds of a trade starting, back when it ends
@@ -758,6 +759,33 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 await interaction.response.defer()
                 text = await self.flatten_all(str(interaction.user.id))
                 await interaction.followup.send(text)
+
+            @tree.command(name="journal", description="Download every paper trade and fill as spreadsheet files (CSV)")
+            @app_commands.describe(bot="a bot's name (e.g. Swing, Bumi), or all (the default)",
+                                   start="first day to include, as YYYY-MM-DD (default: since paper trading began)")
+            @owner
+            async def journal_cmd(interaction: discord.Interaction, bot: str = "all", start: str = ""):
+                import io
+                from app import journal
+                await interaction.response.defer(ephemeral=True)
+                which = None if bot.strip().lower() in ("", "all") else bot.strip().lower()
+                if start.strip():
+                    try:
+                        start_day = date.fromisoformat(start.strip()).isoformat()
+                    except ValueError:
+                        await interaction.followup.send("`start` should look like 2026-12-01.", ephemeral=True)
+                        return
+                else:
+                    start_day = None
+                pairs = await asyncio.to_thread(self.log.fleet_prefix, "daily:")
+                trades, fills, summary = journal.build(pairs, which, start_day)
+                stamp = datetime.now(NY).strftime("%Y-%m-%d")
+                tag = which or "all"
+                await interaction.followup.send(
+                    summary + "\n-# Paper trades only. For real money, Alpaca's statements are the official record.",
+                    files=[discord.File(io.BytesIO(trades), filename=f"journal-{tag}-trades-{stamp}.csv"),
+                           discord.File(io.BytesIO(fills), filename=f"journal-{tag}-fills-{stamp}.csv")],
+                    ephemeral=True)
 
             @tree.command(name="pause-bumi", description="Pause only Bumi: no new orders, positions kept (Swing unaffected)")
             @owner
