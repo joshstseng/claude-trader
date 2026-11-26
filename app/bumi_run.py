@@ -65,23 +65,16 @@ BREAKER_CONTEXT = {
 
 
 def breaker_text(kind: str, what: str) -> str:
-    """The breaker ping: what happened, what Bumi does now, why the check exists, and what to look at."""
-    if kind == "bad_day":
-        head = (f"🛑 **Bumi paused new buys:** {what}.\n\n"
-                "**What this does:** no new trades until you lift the pause. Bumi keeps its positions, and its normal exits "
-                "(trailing stops, leaving the core when the market isn't calm) still run. **Nothing was sold because of this.**\n\n")
-        then = ("• **Then:** `/resume-bumi` if it's normal market pain. If something looks broken, leave it paused or "
-                "`/flatten-bumi confirm:yes`, and tell Claude what you saw.")
-    else:
-        head = (f"⚠️ **Bumi alert:** {what}.\n\n"
-                "**What this does:** nothing changes. **Bumi keeps trading as normal**, including buying dips, which is "
-                "often where its recoveries come from. Nothing was paused or sold. This is just so you know.\n\n")
-        then = ("• **Then:** usually nothing to do. If something looks broken, `/pause-bumi` stops new orders, or "
-                "`/flatten-bumi confirm:yes` sells everything; tell Claude what you saw.")
-    return (head + f"**Why you're getting this:** a check so you look before Bumi keeps adding money in unusual conditions. "
-            f"{BREAKER_CONTEXT[kind]}\n\n**No need to panic. Worth checking:**\n"
+    """The alert ping: what happened, that Bumi keeps trading, why the check exists, and what to look at."""
+    return (f"⚠️ **Bumi alert:** {what}.\n\n"
+            "**What this does:** nothing changes. **Bumi keeps trading as normal**, including buying dips, which is often "
+            "where its recoveries come from. Nothing was paused or sold. This is just so you know.\n\n"
+            f"**Why you're getting this:** a check so you look when conditions are unusual. {BREAKER_CONTEXT[kind]}\n\n"
+            "**No need to panic. Worth checking:**\n"
             "• **The market:** is this a broad selloff? Look at QQQ, SPY and VIX.\n"
-            "• **Bumi:** do its recent fills and positions in `#system` and its Alpaca account look right?\n" + then)
+            "• **Bumi:** do its recent fills and positions in `#system` and its Alpaca account look right?\n"
+            "• **Then:** usually nothing to do. If something looks broken, `/pause-bumi` stops new orders, or "
+            "`/flatten-bumi confirm:yes` sells everything; tell Claude what you saw.")
 
 
 def bot_command(command: str, state, run_mode: str, broker) -> tuple[str | None, str]:

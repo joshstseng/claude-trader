@@ -413,10 +413,10 @@ def align(bars_by_sym: dict[str, list[D]], vix_series: dict[date, float], expect
 def track_equity(state: State, day: str, equity: float, fraction: float, s: dict) -> tuple[str, str] | None:
     """Once a day after the close: Bumi's return on the money it trades (equity change / (equity x fraction)), a running
     index and its peak. Returns (kind, text) when you should hear about it, else None.
-        bad_day    a day worse than bad_day_pct (never happened since 2001): pauses NEW buys until /resume-bumi
-        drawdown   down drawdown_pct from the peak (about once every 5 years in the backtest): an alert only, Bumi keeps
-                   trading; one alert per slide, re-armed at the next new peak
-    Bumi never sells because of either; its own exits do the selling."""
+        bad_day    a day worse than bad_day_pct (never happened since 2001)
+        drawdown   down drawdown_pct from the peak (about once every 5 years in the backtest); one alert per slide,
+                   re-armed at the next new peak
+    Both are alerts only (the user's choice, 2026-11-26): Bumi keeps trading normally and never sells because of them."""
     r = s.get("risk") or {}
     t = state.doc.setdefault("equity_track", {"last_day": None, "last_equity": None, "index": 1.0, "peak": 1.0})
     if t["last_day"] == day or equity <= 0:
@@ -428,9 +428,8 @@ def track_equity(state: State, day: str, equity: float, fraction: float, s: dict
         if t["index"] >= t["peak"]:
             t["peak"], t["dd_alerted"] = t["index"], False
         dd = t["index"] / t["peak"] - 1
-        if ret <= -r.get("bad_day_pct", .08) and not state.doc.get("buys_paused"):
+        if ret <= -r.get("bad_day_pct", .08):
             alert = ("bad_day", f"a {ret:.1%} day on the money Bumi trades (alert at -{r.get('bad_day_pct', .08):.0%})")
-            state.doc["buys_paused"] = alert[1]
         elif dd <= -r.get("drawdown_pct", .15) and not t.get("dd_alerted"):
             alert = ("drawdown", f"down {-dd:.1%} from its peak (alert at -{r.get('drawdown_pct', .15):.0%})")
             t["dd_alerted"] = True

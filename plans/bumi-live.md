@@ -77,10 +77,9 @@ Change it outside market hours, then confirm the banner shows the new size.
 
 ## Safety nets while live
 
-- **Bad day:** down more than 8% in a day on the money Bumi trades (never happened since 2001) → it pauses **new buys**
-  and pings you. `/resume-bumi` allows buys again.
-- **Drawdown:** down more than 15% from its peak (about once every 5 years in the backtest) → **an alert only; Bumi keeps
-  trading.** One alert per slide.
+- **Bad day:** down more than 8% in a day on the money Bumi trades (never happened since 2001) → **an alert only.**
+- **Drawdown:** down more than 15% from its peak (about once every 5 years in the backtest) → **an alert only.** One per slide.
+- **Bumi keeps trading normally through both;** each alert explains what happened and what to check.
 - Bumi never sells because of either; its own exits do the selling.
 - **Sanity check:** any plan that would need more money than Bumi has drops its buys and says so in the plan.
 - Deposits or withdrawals look like gains or losses to these checks. Tell Claude before moving money.

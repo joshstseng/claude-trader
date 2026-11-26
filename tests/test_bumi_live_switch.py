@@ -72,19 +72,15 @@ class Sizing(Base):
 
 
 class Breakers(Base):
-    def test_bad_day_pauses_new_buys_once(self):
+    def test_bad_day_alerts_and_keeps_trading(self):
         self.assertIsNone(L.track_equity(self.state, "2026-12-01", 20000.0, .25, S))
         self.assertIsNone(L.track_equity(self.state, "2026-12-02", 19800.0, .25, S))     # -4% on the $5k traded
         alert = L.track_equity(self.state, "2026-12-03", 19350.0, .25, S)                # -9% on the money traded
         self.assertEqual(alert[0], "bad_day")
+        self.assertIsNone(self.state.doc.get("buys_paused"))                              # Bumi keeps trading
         text = R.breaker_text(*alert)
-        self.assertIn("Nothing was sold because of this", text); self.assertIn("-7.5%", text); self.assertIn("/resume-bumi", text)
-        self.assertLess(len(text), 1900)
-        self.assertTrue(self.state.doc["buys_paused"])
-        nxt = L.track_equity(self.state, "2026-12-04", 19000.0, .25, S)                  # no second bad-day pause...
-        self.assertEqual(nxt[0], "drawdown")                                             # ...but the slide is now -19%
-        self.assertEqual(nxt[1], "down 19.0% from its peak (alert at -15%)")
-        self.assertIsNone(L.track_equity(self.state, "2026-12-04", 18000.0, .25, S))     # once a day
+        self.assertIn("Bumi keeps trading as normal", text); self.assertIn("-7.5%", text); self.assertLess(len(text), 1900)
+        self.assertIsNone(L.track_equity(self.state, "2026-12-03", 18000.0, .25, S))     # once a day
 
     def test_drawdown_alerts_once_and_keeps_trading(self):
         eq = 50000.0

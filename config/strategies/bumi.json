@@ -39,7 +39,7 @@
     "slippage_bp": 1.0
   },
   "risk": {
-    "note": "Live-phase checks (2026-11-26), measured on the money Bumi trades (BUMI_SIZE_FRACTION of the account). bad_day: pauses NEW buys until /resume-bumi (never happened since 2001). drawdown: alert only, Bumi keeps trading (about once every 5 years in the backtest). Bumi never sells because of either.",
+    "note": "Live-phase alerts (2026-11-26), measured on the money Bumi trades (BUMI_SIZE_FRACTION of the account). Both are alerts only: Bumi keeps trading normally. bad_day never happened since 2001; drawdown about once every 5 years in the backtest.",
     "bad_day_pct": 0.08,
     "drawdown_pct": 0.15
   }
