@@ -22,27 +22,54 @@ def read(b):
     return list(csv.DictReader(io.StringIO(b.decode())))
 
 
-class Journal(unittest.TestCase):
-    def test_all_bots(self):
-        trades, fills, summary = journal.build(PAIRS)
-        t = read(trades)
-        self.assertEqual([r["bot"] for r in t], ["swing", "bumi"])
-        self.assertEqual((t[0]["symbol"], t[0]["side"], t[0]["held"], t[0]["model_day_pnl_usd"]), ("QQQ", "short", "30m", "3.0"))
-        self.assertEqual(t[0]["pnl_pct"], str(round((610.44 / 610.66 - 1) * -100, 3)))
-        self.assertEqual((t[1]["symbol"], t[1]["side"], t[1]["held"], t[1]["entry_date"]), ("QLD", "long", "8 days", "2026-12-01"))
-        f = read(fills)
-        self.assertEqual(len(f), 3)
-        self.assertEqual((f[2]["model_price"], f[2]["slippage_bp"]), ("107.95", "-4.63"))
-        self.assertIn("2 closed trades", summary); self.assertIn("3 fills", summary); self.assertIn("+$91.07", summary)
-        self.assertEqual(list(t[0].keys()), journal.TRADE_COLS)
+def unzip(data):
+    import zipfile
+    z = zipfile.ZipFile(io.BytesIO(data))
+    return {n: read(z.read(n)) for n in z.namelist()}
 
-    def test_filters(self):
-        t, f, s = journal.build(PAIRS, bot="bumi")
-        self.assertEqual([r["bot"] for r in read(t)], ["bumi"])
-        t, f, s = journal.build(PAIRS, start="2026-12-01")
-        self.assertEqual([r["bot"] for r in read(t)], ["bumi"])
-        t, f, s = journal.build([], None, None)
-        self.assertEqual(read(t), []); self.assertIn("no bots yet", s)
+
+class Journal(unittest.TestCase):
+    def test_all_bots_one_section_each_and_one_zip(self):
+        data, text = journal.build(PAIRS)
+        files = unzip(data)
+        self.assertEqual(sorted(files), ["bumi-fills.csv", "bumi-trades.csv", "swing-fills.csv", "swing-trades.csv"])
+        t = files["swing-trades.csv"][0]
+        self.assertEqual((t["symbol"], t["side"], t["held"], t["model_day_pnl_usd"]), ("QQQ", "short", "30m", "3.0"))
+        self.assertEqual(files["bumi-trades.csv"][0]["held"], "8 days")
+        self.assertEqual(files["bumi-fills.csv"][0]["slippage_bp"], "-4.63")
+        self.assertLess(text.index("**Swing**"), text.index("**Bumi**"))
+        self.assertIn("1 closed trade · 1 won · **+$11.07**", text)
+        self.assertIn("Model +$3.00 · fills 0.7 bp worse than the model", text)
+        self.assertIn("**+$80.00**", text)
+
+    def test_one_bot_and_no_trades_yet(self):
+        only = [p for p in PAIRS if not p[0].startswith("daily:bumi")]
+        data, text = journal.build(only, bot="bumi")
+        self.assertIn("**Bumi**", text); self.assertNotIn("Swing", text)
+        self.assertIn("No daily records yet", text)
+        self.assertEqual(sorted(unzip(data)), ["bumi-fills.csv", "bumi-trades.csv"])
+        quiet = [("daily:swing:2026-11-23", json.dumps({"day": "2026-11-23", "trades": [], "fills": []}))]
+        self.assertIn("No closed trades yet (since Nov 23, 1 market day)", journal.build(quiet, bot="swing")[1])
+
+    def test_recent_five_then_a_note(self):
+        recs = [{"day": f"2026-12-{d:02d}", "symbol": "QQQ", "model_pnl": 0.0, "fills": [],
+                 "trades": [{"side": 1, "qty": 10, "entry": 100.0, "exit": 101.0 if d % 2 else 99.0, "pnl": 10.0 if d % 2 else -10.0,
+                             "time_in": "10:00:00", "time_out": "11:15:00", "why": "back inside the band"}]} for d in range(1, 9)]
+        _, text = journal.build([(f"daily:swing:{r['day']}", json.dumps(r)) for r in recs], bot="swing")
+        lines = text.splitlines()
+        rows = [l for l in lines if l.startswith(("✅", "❌"))]
+        self.assertEqual(len(rows), 5)
+        self.assertTrue(rows[0].startswith("❌ `Dec 8` long QQQ · **−$10.00** · 1h 15m · back inside the band"))
+        self.assertIn("-# + 3 older trades in the spreadsheet", text)
+        _, one = journal.build(PAIRS, bot="swing")
+        self.assertNotIn("older trade", one)
+
+    def test_unknown_bot_and_date_filter(self):
+        data, text = journal.build(PAIRS, bot="zed")
+        self.assertEqual(data, b""); self.assertIn("No bot called **zed**", text); self.assertIn("Swing, Bumi", text)
+        data, text = journal.build(PAIRS, start="2026-12-01")
+        self.assertIn("from Dec 1", text)
+        self.assertEqual(unzip(data)["swing-trades.csv"], [])
 
 
 if __name__ == "__main__":

@@ -90,14 +90,72 @@ def to_csv(rows: list[dict], cols: list[str]) -> bytes:
     return buf.getvalue().encode()
 
 
-def build(pairs: list[tuple[str, str]], bot: str | None = None, start: str | None = None) -> tuple[bytes, bytes, str]:
-    """(trades.csv, fills.csv, a one-line summary)."""
-    recs = records(pairs, bot, start)
-    trades, fills = trade_rows(recs), fill_rows(recs)
-    pnl = sum(float(t["pnl_usd"]) for t in trades if t["pnl_usd"] != "")
-    bots = sorted({w for w, _ in recs})
-    first = recs[0][1]["day"] if recs else None
-    summary = (f"📒 **Trade journal** · {', '.join(b.capitalize() for b in bots) or 'no bots yet'}"
-               + (f" · since {first}" if first else "") + f" · {len(trades)} closed trade{'' if len(trades) == 1 else 's'} · "
-               f"{len(fills)} fill{'' if len(fills) == 1 else 's'} · paper P&L {'+' if pnl >= 0 else '−'}${abs(pnl):,.2f}")
-    return to_csv(trades, TRADE_COLS), to_csv(fills, FILL_COLS), summary
+RECENT = 5
+BLURB = {"swing": "QQQ · intraday breakout · paper", "bumi": "index dips + calm-market QQQ · paper"}
+
+
+def _usd(x: float) -> str:
+    return f"{'+' if x >= 0 else '−'}${abs(x):,.2f}"
+
+
+def bot_section(who: str, recs: list[dict]) -> str:
+    """A short, readable block for one bot."""
+    name = who.capitalize()
+    head = f"**{name}**" + (f"\n-# {BLURB[who]}" if who in BLURB else "")
+    if not recs:
+        return head + "\nNo daily records yet. They start after this bot's next market day."
+    first = recs[0]["day"]
+    trades = trade_rows([(who, r) for r in recs])
+    fills = fill_rows([(who, r) for r in recs])
+    since = f"since {date.fromisoformat(first):%b %-d}"
+    if not trades:
+        return head + f"\nNo closed trades yet ({since}, {len(recs)} market day{'' if len(recs) == 1 else 's'})."
+    pnl = [float(t["pnl_usd"]) for t in trades]
+    wins = sum(x > 0 for x in pnl)
+    lines = [head, f"{len(trades)} closed trade{'' if len(trades) == 1 else 's'} · {wins} won · **{_usd(sum(pnl))}** · {since}",
+             f"Win rate {wins / len(trades):.0%} · avg {_usd(sum(pnl) / len(pnl))} · best {_usd(max(pnl))} · worst {_usd(min(pnl))}"]
+    model = sum(r.get("model_pnl") or 0 for r in recs) if any("model_pnl" in r for r in recs) else None
+    slips = [float(f["slippage_bp"]) for f in fills if f["slippage_bp"] != ""]
+    extra = []
+    if model is not None:
+        extra.append(f"model {_usd(model)}")
+    if slips:
+        avg = sum(slips) / len(slips)
+        extra.append(f"fills {abs(avg):.1f} bp {'worse' if avg > 0 else 'better'} than the model")
+    if extra:
+        lines.append(" · ".join(extra).capitalize())
+    recent = trades[-RECENT:][::-1]
+    lines.append("Recent trades:")
+    for t in recent:
+        icon = "✅" if float(t["pnl_usd"]) > 0 else "❌" if float(t["pnl_usd"]) < 0 else "➖"
+        lines.append(f"{icon} `{date.fromisoformat(t['exit_date']):%b %-d}` {t['side']} {t['symbol']} · **{_usd(float(t['pnl_usd']))}**"
+                     + (f" · {t['held']}" if t["held"] else "") + (f" · {t['exit_reason']}" if t["exit_reason"] else ""))
+    if len(trades) > RECENT:
+        more = len(trades) - RECENT
+        lines.append(f"-# + {more} older trade{'' if more == 1 else 's'} in the spreadsheet")
+    return "\n".join(lines)
+
+
+def build(pairs: list[tuple[str, str]], bot: str | None = None, start: str | None = None,
+          bots: tuple[str, ...] = ("swing", "bumi")) -> tuple[bytes, str]:
+    """(a zip with <bot>-trades.csv and <bot>-fills.csv per bot, the message). bots: always listed, even with no records."""
+    import zipfile
+    recs = records(pairs, None, start)
+    have = sorted({w for w, _ in recs})
+    if bot:
+        show = [bot]
+    else:
+        show = list(dict.fromkeys([*bots, *have]))
+    by = {w: [r for who, r in recs if who == w] for w in show}
+    span = f" · from {date.fromisoformat(start):%b %-d}" if start else ""
+    if bot and bot not in have and bot not in bots:
+        known = ", ".join(w.capitalize() for w in dict.fromkeys([*bots, *have]))
+        return b"", f"📒 **Trade journal**{span}\nNo bot called **{bot}** has records. Try: {known}."
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for w in show:
+            pairs_w = [(w, r) for r in by[w]]
+            z.writestr(f"{w}-trades.csv", to_csv(trade_rows(pairs_w), TRADE_COLS))
+            z.writestr(f"{w}-fills.csv", to_csv(fill_rows(pairs_w), FILL_COLS))
+    text = f"📒 **Trade journal**{span}\n\n" + "\n\n".join(bot_section(w, by[w]) for w in show)
+    return buf.getvalue(), text

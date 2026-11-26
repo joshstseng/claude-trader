@@ -778,14 +778,14 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 else:
                     start_day = None
                 pairs = await asyncio.to_thread(self.log.fleet_prefix, "daily:")
-                trades, fills, summary = journal.build(pairs, which, start_day)
+                data, text = journal.build(pairs, which, start_day, bots=("swing", *(b for b in OWN_LEDGER_BOTS if b != "swing")))
+                text += "\n\n-# Spreadsheets attached: a trades and a fills sheet per bot. Paper only; for real money, Alpaca's statements are the official record."
+                if not data:
+                    await interaction.followup.send(text, ephemeral=True)
+                    return
                 stamp = datetime.now(NY).strftime("%Y-%m-%d")
-                tag = which or "all"
                 await interaction.followup.send(
-                    summary + "\n-# Paper trades only. For real money, Alpaca's statements are the official record.",
-                    files=[discord.File(io.BytesIO(trades), filename=f"journal-{tag}-trades-{stamp}.csv"),
-                           discord.File(io.BytesIO(fills), filename=f"journal-{tag}-fills-{stamp}.csv")],
-                    ephemeral=True)
+                    text[:1990], files=[discord.File(io.BytesIO(data), filename=f"journal-{which or 'all'}-{stamp}.zip")], ephemeral=True)
 
             @tree.command(name="pause-bumi", description="Pause only Bumi: no new orders, positions kept (Swing unaffected)")
             @owner
