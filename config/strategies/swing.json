@@ -20,5 +20,15 @@
   "costs": {
     "model_bp_per_side": 0.6
   },
-  "flat_at": "15:58:45"
+  "flat_at": "15:58:45",
+  "risk": {
+    "note": "Safety nets only (2026-11-25): set so none triggered in the 2016-Oct 2026 backtest. They must not change normal trades.",
+    "emergency_stop_account_pct": 0.025,
+    "daily_loss_pct": 0.03,
+    "max_exposure_cap": 2.0,
+    "backup_flat_at": "15:59:30",
+    "blind_after_s": 180,
+    "max_outages": 3,
+    "broker_warn_after_s": 60
+  }
 }

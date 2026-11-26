@@ -94,12 +94,33 @@ class Cal:
 class Broker:
     def __init__(self):
         self.pos, self.orders, self.sent, self.closed, self.fill = 0, {}, [], False, True
+        self.px, self.stops, self.down = 101.0, {}, False
 
     def position(self):
-        return self.pos, 101.0
+        if self.down:
+            raise ConnectionError("alpaca down")
+        return self.pos, self.px
 
     def order(self, cid):
-        return self.orders.get(cid)
+        return self.orders.get(cid) or self.stops.get(cid)
+
+    def place_stop(self, side, qty, price, cid):
+        self.stops[cid] = {"status": "new", "side": side, "qty": qty, "price": price, "filled_qty": 0, "filled_price": None}
+        return "new"
+
+    def cancel(self, cid):
+        st = self.stops.get(cid)
+        if st and st["status"] == "new":
+            st["status"] = "canceled"
+        return st["status"] if st else "missing"
+
+    def live_stops(self):
+        return [x for x in self.stops.values() if x["status"] == "new"]
+
+    def fire_stop(self):
+        st = self.live_stops()[0]
+        st.update(status="filled", filled_qty=st["qty"], filled_price=st["price"])
+        self.pos += st["qty"] if st["side"] == "buy" else -st["qty"]
 
     def submit(self, side, qty, cid):
         if cid in self.orders:
@@ -113,6 +134,8 @@ class Broker:
 
     def close_all(self):
         self.closed = True; self.pos = 0
+        for x in self.live_stops():
+            x["status"] = "canceled"
 
 
 def rows_for(points, through):
@@ -244,6 +267,90 @@ class Morning(Live):
         wild = L.morning_text("2026-11-24", "QQQ", 500.0, {**m, "weight": .5}, 500.0, 100000)
         self.assertTrue(any(x in wild for x in L.MORNING_LINES["wild"]))
         self.assertIn("**100 shares**", wild)
+
+
+class Safety(Live):
+    """The five safety nets (config "risk"). Entry: 990 sh at $101 (see test_paper_enters_once_then_flat_by_the_close)."""
+
+    def entered(self):
+        r = self.routine(); self.at(r, 9, 1); self.force(r); self.at(r, 10, 0); self.at(r, 10, 0, 10); self.at(r, 10, 0, 15)
+        self.assertEqual(self.broker.pos, 990)
+        return r
+
+    def test_every_position_gets_one_emergency_stop_at_a_2_5_pct_account_loss(self):
+        r = self.entered(); self.at(r, 10, 0, 20)
+        stops = self.broker.live_stops()
+        self.assertEqual(len(stops), 1)
+        self.assertEqual((stops[0]["side"], stops[0]["qty"], stops[0]["price"]), ("sell", 990, round(101 - 2500 / 990, 2)))
+
+    def test_the_stop_is_cancelled_before_the_normal_exit(self):
+        r = self.entered(); self.at(r, 15, 58, 50); self.at(r, 15, 58, 55)
+        self.assertEqual(self.broker.pos, 0)
+        self.assertEqual(self.broker.live_stops(), [])
+        self.assertIsNone(self.state.ledger.get("stop"))
+
+    def test_a_filled_emergency_stop_is_booked_and_ends_the_day(self):
+        r = self.entered(); self.broker.fire_stop(); self.at(r, 10, 5)
+        self.assertEqual(self.state.ledger["closed"][-1]["why"], "emergency stop")
+        self.assertTrue(self.state.day(DAY.isoformat())["halted"])
+        n = len(self.broker.sent); self.at(r, 10, 30); self.at(r, 11, 0)
+        self.assertEqual(len(self.broker.sent), n)                      # no new entries after it fired
+
+    def test_daily_loss_limit_exits_and_stops_for_the_day(self):
+        r = self.entered(); self.broker.px = 101 - 3001 / 990           # open loss just past -$3,000
+        self.at(r, 10, 5); self.at(r, 10, 5, 10)
+        self.assertIn("daily loss limit", self.state.day(DAY.isoformat())["halt_why"])
+        self.assertEqual(self.broker.pos, 0)
+        self.assertEqual(self.broker.live_stops(), [])
+
+    def test_a_position_over_the_cap_is_closed_and_the_day_halted(self):
+        r = self.entered(); self.broker.pos = 5000; self.at(r, 10, 5)
+        self.assertTrue(self.broker.closed)
+        self.assertIn("cap", self.state.day(DAY.isoformat())["halt_why"])
+
+    def test_backup_close_out_at_3_59_30_if_the_exit_didnt_fill(self):
+        r = self.entered(); self.broker.fill = False; self.at(r, 15, 58, 50)
+        self.assertEqual(self.broker.pos, 990)                          # exit sent but not filled
+        self.at(r, 15, 59, 31)
+        self.assertTrue(self.broker.closed); self.assertEqual(self.broker.pos, 0)
+        self.assertTrue(any("closed everything" in x for x in self.posts))
+        self.at(r, 15, 59, 40)
+        self.assertEqual(self.state.ledger["closed"][-1]["why"], "backup close-out (estimated price)")
+
+    def test_three_minutes_blind_in_a_trade_exits_and_entries_wait_for_data(self):
+        r = self.entered(); self.at(r, 10, 0, 20)
+
+        def down(d):
+            raise ConnectionError("feed down")
+        good, r.today = r.today, down
+        self.at(r, 10, 5, 5); self.assertEqual(self.broker.pos, 990)    # blind, but under 3 minutes
+        self.at(r, 10, 8, 10); self.at(r, 10, 8, 15)
+        self.assertEqual(self.broker.pos, 0)
+        self.assertEqual(self.state.ledger["closed"][-1]["why"], "data outage")
+        n = len(self.broker.sent); self.at(r, 10, 30, 5)
+        self.assertEqual(len(self.broker.sent), n)                      # no entries while blind
+        r.today = good; self.at(r, 10, 31)
+        self.assertTrue(any("live bars are back" in x for x in self.posts))
+        self.assertFalse(self.state.day(DAY.isoformat()).get("blind_exit"))
+
+    def test_three_outages_end_the_day(self):
+        r = self.routine(); self.at(r, 9, 1); self.force(r)
+        good = r.today
+
+        def down(d):
+            raise ConnectionError("feed down")
+        for m in (35, 45, 55):
+            r.today = down; self.at(r, 9, m, 5)
+            r.today = good; self.at(r, 9, m + 1)
+        self.assertIn("outages", self.state.day(DAY.isoformat())["halt_why"])
+
+    def test_alpaca_down_warns_once_and_keeps_the_stop(self):
+        r = self.entered(); self.at(r, 10, 0, 20); self.broker.down = True
+        self.at(r, 10, 1); self.at(r, 10, 2, 5); self.at(r, 10, 3)
+        self.assertEqual(sum("can't reach Alpaca" in x for x in self.posts), 1)
+        self.assertEqual(len(self.broker.live_stops()), 1)
+        self.broker.down = False; self.at(r, 10, 4)
+        self.assertTrue(any("reachable again" in x for x in self.posts))
 
 
 class Pings(unittest.TestCase):

@@ -7,6 +7,13 @@
 
 SWING_MODE=paper is the only value that can send orders. Anything else is shadow. One order is in flight at a time, and
 client order ids make a retried send harmless. Exits still run while paused; new entries do not.
+
+Safety nets (config "risk"; none triggered in the 2016-Oct 2026 backtest, so normal trades are unchanged):
+    emergency stop     a resting GTC stop at a 2.5% account loss, placed with every position, cancelled before each exit
+    daily loss limit   realized + open P&L at -3% of the base: flat and done for the day
+    position cap       never more than 2x the base; a bigger position is closed and the day halted
+    backup close-out   3:59:30 PM: anything still open is closed; after the close, a held position pings you
+    disconnect rule    3 minutes without live bars while in a trade: exit; no entries until data is back; 3 outages = done
 """
 
 from __future__ import annotations
@@ -108,6 +115,38 @@ class AlpacaSwing:
 
     def close_all(self) -> None:
         self.t.close_all_positions(cancel_orders=True)
+
+    def place_stop(self, side: str, qty: int, price: float, client_id: str) -> str:
+        """The resting emergency stop. GTC, so it still protects if the bot is down past the close."""
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import StopOrderRequest
+        o = self.t.submit_order(StopOrderRequest(symbol=self.symbol, qty=qty, time_in_force=TimeInForce.GTC, stop_price=round(price, 2),
+                                                 side=OrderSide.BUY if side == "buy" else OrderSide.SELL, client_order_id=client_id))
+        return getattr(o.status, "value", str(o.status))
+
+    def cancel(self, client_id: str, wait_s: float = 3.0) -> str:
+        """Cancel an order and wait briefly until Alpaca confirms. Returns its final status (canceled, filled, ...)."""
+        import time
+        from alpaca.common.exceptions import APIError
+        try:
+            o = self.t.get_order_by_client_id(client_id)
+        except APIError:
+            return "missing"
+        done = ("canceled", "filled", "expired", "rejected", "replaced")
+        status = getattr(o.status, "value", str(o.status))
+        if status in done:
+            return status
+        try:
+            self.t.cancel_order_by_id(o.id)
+        except APIError:
+            pass                                           # already on its way out; the status check below decides
+        end = time.monotonic() + wait_s
+        while time.monotonic() < end:
+            status = getattr(self.t.get_order_by_client_id(client_id).status, "value", "")
+            if status in done:
+                return status
+            time.sleep(.2)
+        return status
 
 
 def matrix(rows: list[tuple[datetime, float, float, float, float]]):
@@ -287,6 +326,9 @@ class Routine:
         self.sessions: dict[date, object] = {}
         self.retry_at: datetime | None = None
         self.warned: set[str] = set()
+        self.risk = s.get("risk") or {}
+        self.backup_at = dtime.fromisoformat(self.risk.get("backup_flat_at", "15:59:30"))
+        self.broker_down_since: datetime | None = None
 
     def session(self, d: date):
         if d not in self.sessions:
@@ -352,8 +394,15 @@ class Routine:
             rows = self.today(t.date())
         except Exception as e:  # noqa: BLE001
             log.warning("today's bars failed: %s", e)
-            self.warn_once(f"{key}:data", f"⚠️ **Swing v1.1 can't read live bars** ({type(e).__name__}). Still retrying; it will be flat by the close.")
+            self.note_outage(rec, key, t)
+            self.warn_once(f"{key}:data", f"⚠️ **Swing v1.1 can't read live bars** ({type(e).__name__}). No new entries until they're back; "
+                           f"an open trade is closed after {int(self.risk.get('blind_after_s', 180)) // 60} minutes without them.")
             return
+        if rec.get("blind_since"):
+            rec["blind_since"], rec["blind_exit"] = None, False
+            self.state.save()
+            self.warned.discard(f"{key}:data")
+            self.post("system", "✅ **Swing v1.1:** live bars are back. New entries resume at the next signal.", False)
         have = any((x.astimezone(NY).hour * 60 + x.astimezone(NY).minute - 570) // 5 == k for x, *_ in rows)
         if not have and t < session.at(session.open) + timedelta(seconds=(k + 1) * 300 + MISSING_BAR_WAIT_S):
             return
@@ -391,30 +440,75 @@ class Routine:
         return "posted the morning card preview"
 
     def target(self, rec: dict, t: datetime, session) -> int:
-        if rec.get("skip") or rec.get("halted") or not rec.get("v11") or t.time() >= self.flat_at:
+        if rec.get("skip") or rec.get("halted") or rec.get("blind_exit") or not rec.get("v11") or t.time() >= self.flat_at:
             return 0
         return int(rec["v11"]["side"])
 
     def trade(self, rec: dict, key: str, t: datetime, session) -> None:
+        if rec.get("pending") and t >= session.at(self.backup_at) and not rec.get("backup_done"):
+            try:                                          # a stuck exit order must not block the backup close-out
+                pos, _ = self.broker.position()
+            except Exception:  # noqa: BLE001
+                pos = 0
+            if self.backup_close(rec, key, t, session, pos):
+                return
         if rec.get("pending"):
             self.poll(rec, key, t)
             if rec.get("pending"):
                 return
+        if self.check_stop(rec, key, t):
+            return
         try:
             pos, px = self.broker.position()
         except Exception:  # noqa: BLE001
             log.warning("couldn't read the position", exc_info=True)
+            if self.broker_down_since is None:
+                self.broker_down_since = t
+            elif (t - self.broker_down_since).total_seconds() >= self.risk.get("broker_warn_after_s", 60):
+                self.warn_once(f"{key}:broker", "⚠️ **Swing v1.1 can't reach Alpaca.** It keeps retrying; the resting emergency stop "
+                               "protects any open position meanwhile.")
+            return
+        if self.broker_down_since is not None:
+            self.broker_down_since = None
+            if f"{key}:broker" in self.warned:
+                self.warned.discard(f"{key}:broker")
+                self.post("system", "✅ **Swing v1.1:** Alpaca is reachable again.", False)
+        cap = self.max_shares(rec, px)
+        if cap is not None and abs(pos) > cap:
+            self.halt(rec, key, f"position of {abs(pos)} sh is over the {cap} sh cap")
+            rec["closed_by"] = "position cap"
+            self.state.ledger["stop"] = None
+            self.state.save()
+            self.broker.close_all()
             return
         self.reconcile(pos, px, rec, key, t)
+        if pos == 0 and self.state.ledger.get("stop"):
+            self.clear_stop(rec, key, t)                  # never leave a stop behind with nothing to protect
+        self.check_daily_loss(rec, key, px)
+        if self.backup_close(rec, key, t, session, pos):
+            return
+        blind = self.blind_for(rec, t)
+        if pos and blind is not None and blind >= self.risk.get("blind_after_s", 180) and not rec.get("blind_exit"):
+            rec["blind_exit"] = True
+            rec["missed"] = (rec.get("v11") or {}).get("signal_bar", -1)   # don't re-enter the same signal when data returns
+            self.state.save()
+            self.post("system", f"🛑 **Swing v1.1:** no live bars for {int(blind // 60)} minutes while in a trade, so it's closing the "
+                      f"{self.sym} position. New entries resume when data is back.", True)
         want = self.target(rec, t, session)
         if pos and (want == 0 or (pos > 0) != (want > 0)):
             why = (rec.get("v11") or {}).get("why") or "flat"
             if t.time() >= self.flat_at:
                 why = "flat by the close"
             elif rec.get("halted"):
-                why = "flatten"
+                why = rec.get("halt_why") or "flatten"
+            elif rec.get("blind_exit"):
+                why = "data outage"
+            if not self.clear_stop(rec, key, t):
+                return                                    # the stop must be gone (or filled) before the exit order
             self.send(rec, key, t, "sell" if pos > 0 else "buy", abs(pos), "exit", why)
-        elif not pos and want and t < session.at(self.flat_at):
+        elif pos:
+            self.ensure_stop(rec, key, t, pos)
+        elif not pos and want and t < session.at(self.flat_at) and not rec.get("blind_since"):
             m = rec["v11"]
             if m["signal_bar"] == rec.get("missed"):
                 return
@@ -429,6 +523,8 @@ class Routine:
                 self.post("system", "⏭️ Swing v1.1 skipped an entry because the signal was more than one bar old.", True)
                 return
             qty = math.floor(m["weight"] * self.ref / rec["last_close"])
+            if cap is not None:
+                qty = min(qty, cap)
             if qty >= 1:
                 self.send(rec, key, t, "buy" if want > 0 else "sell", qty, "entry", m["why"])
 
@@ -495,6 +591,129 @@ class Routine:
         if lot["qty"] <= 0:
             led["open"] = None
 
+    # ---- safety nets (config "risk")
+
+    def halt(self, rec: dict, key: str, why: str) -> None:
+        """Stop trading for the rest of the day. target() then wants flat, so any position is exited."""
+        if rec.get("halted"):
+            return
+        rec["halted"], rec["halt_why"] = True, why
+        self.state.save()
+        self.post("system", f"🛑 **Swing v1.1 stopped for today:** {why}. Any open position is being closed.", True)
+
+    def max_shares(self, rec: dict, px: float | None) -> int | None:
+        price = px or rec.get("last_close")
+        return math.floor(self.risk.get("max_exposure_cap", 2.0) * self.ref / price) if price else None
+
+    def check_daily_loss(self, rec: dict, key: str, px: float | None) -> None:
+        limit = self.risk.get("daily_loss_pct")
+        if not limit or rec.get("halted"):
+            return
+        day = sum(x["pnl"] for x in self.state.ledger["closed"] if x["day"] == key)
+        lot = self.state.ledger["open"]
+        if lot and px:
+            day += lot["side"] * (px - lot["entry"]) * lot["qty"]
+        if day <= -limit * self.ref:
+            self.halt(rec, key, f"daily loss limit hit ({_usd(day)}, limit {_usd(-limit * self.ref)})")
+
+    def backup_close(self, rec: dict, key: str, t: datetime, session, pos: int) -> bool:
+        """3:59:30 PM: anything still open is closed outright. After the close, a held position pings you."""
+        if not pos:
+            return False
+        if t >= session.at(session.close) + timedelta(seconds=60):
+            self.warn_once(f"{key}:overnight", f"⚠️ **Swing v1.1 is still holding {abs(pos)} {self.sym} after the close.** "
+                           "It will exit at the next open. Check its Alpaca account.")
+            return False
+        if t >= session.at(self.backup_at) and not rec.get("backup_done"):
+            rec["backup_done"], rec["closed_by"], rec["pending"] = True, "backup close-out", None
+            self.state.ledger["stop"] = None              # close_all cancels it at Alpaca
+            self.state.save()
+            self.broker.close_all()
+            self.post("system", f"🛟 **Swing v1.1:** {abs(pos)} {self.sym} was still open at {self.backup_at:%-I:%M:%S %p}, "
+                      "so it closed everything.", True)
+            return True
+        return False
+
+    def note_outage(self, rec: dict, key: str, t: datetime) -> None:
+        if rec.get("blind_since"):
+            return
+        rec["blind_since"], rec["outages"] = t.isoformat(), rec.get("outages", 0) + 1
+        self.state.save()
+        if rec["outages"] >= self.risk.get("max_outages", 3):
+            self.halt(rec, key, f"{rec['outages']} live-data outages today")
+
+    def blind_for(self, rec: dict, t: datetime) -> float | None:
+        since = rec.get("blind_since")
+        return (t - datetime.fromisoformat(since)).total_seconds() if since else None
+
+    def check_stop(self, rec: dict, key: str, t: datetime) -> bool:
+        """Book the emergency stop if Alpaca filled it. True when it fired."""
+        st = self.state.ledger.get("stop")
+        if not st:
+            return False
+        try:
+            o = self.broker.order(st["id"])
+        except Exception:  # noqa: BLE001
+            return False
+        if not o or o["status"] != "filled" or not o["filled_qty"]:
+            return False
+        self.book(st["side"], o["filled_qty"], o["filled_price"], key, t, "emergency stop")
+        self.state.ledger["stop"] = None
+        self.state.save()
+        self.halt(rec, key, f"emergency stop filled at ${o['filled_price']:,.2f}")
+        return True
+
+    def clear_stop(self, rec: dict, key: str, t: datetime) -> bool:
+        """Cancel the emergency stop before an exit. True when it's gone; False to retry next tick."""
+        st = self.state.ledger.get("stop")
+        if not st:
+            return True
+        try:
+            status = self.broker.cancel(st["id"])
+        except Exception:  # noqa: BLE001
+            log.warning("couldn't cancel the emergency stop", exc_info=True)
+            return False
+        if status == "filled":
+            self.check_stop(rec, key, t)
+            return False
+        if status in ("canceled", "expired", "rejected", "missing", "replaced"):
+            self.state.ledger["stop"] = None
+            self.state.save()
+            return True
+        return False
+
+    def ensure_stop(self, rec: dict, key: str, t: datetime, pos: int) -> None:
+        """Every position has one resting emergency stop for its full size, at a 2.5% loss of the base."""
+        pct, lot = self.risk.get("emergency_stop_account_pct"), self.state.ledger["open"]
+        if not pct or not lot or (lot["side"] > 0) != (pos > 0):
+            return
+        st, qty = self.state.ledger.get("stop"), abs(pos)
+        if st and st["qty"] == qty:
+            return
+        if st and not self.clear_stop(rec, key, t):
+            return
+        price = round(lot["entry"] - lot["side"] * pct * self.ref / qty, 2)
+        if price <= 0:
+            return
+        self.state.doc["seq"] += 1
+        cid = f"swing-{key.replace('-', '')}-{self.state.doc['seq']:04d}-stop"
+        side = "sell" if lot["side"] > 0 else "buy"
+        self.state.ledger["stop"] = {"id": cid, "side": side, "qty": qty, "price": price}
+        self.state.save()                                 # saved first, so a crash can't place a second stop
+        try:
+            self.broker.place_stop(side, qty, price, cid)
+        except Exception as e:  # noqa: BLE001
+            log.exception("emergency stop failed")
+            try:
+                have = self.broker.order(cid)
+            except Exception:  # noqa: BLE001
+                return
+            if not have:
+                self.state.ledger["stop"] = None
+                self.state.save()
+                self.warn_once(f"{key}:stopfail", f"⚠️ **Swing v1.1 couldn't place its emergency stop** ({type(e).__name__}). "
+                               "It will keep trying.")
+
     def reconcile(self, pos: int, px: float | None, rec: dict, key: str, t: datetime) -> None:
         lot = self.state.ledger["open"]
         have = lot["side"] * lot["qty"] if lot else 0
@@ -502,9 +721,12 @@ class Routine:
             return
         if pos == 0 and lot:
             price = px or rec.get("last_close") or lot["entry"]
-            self.book("sell" if lot["side"] > 0 else "buy", lot["qty"], price, key, t, "closed outside the bot (estimated price)")
+            by = rec.pop("closed_by", None)
+            self.book("sell" if lot["side"] > 0 else "buy", lot["qty"], price, key, t,
+                      f"{by} (estimated price)" if by else "closed outside the bot (estimated price)")
             self.state.save()
-            self.post("system", f"⚠️ **Swing v1.1:** the {self.sym} position was closed outside the bot. P&L uses an estimated price.", True)
+            if not by:
+                self.post("system", f"⚠️ **Swing v1.1:** the {self.sym} position was closed outside the bot. P&L uses an estimated price.", True)
         else:
             self.warn_once(f"{key}:mismatch:{pos}:{have}", f"⚠️ **Swing v1.1 position mismatch:** Alpaca shows {pos}, its records show {have}.")
 
@@ -519,7 +741,8 @@ class Routine:
         paper = sum(x["pnl"] for x in day)
         m11, m1 = rec.get("v11") or {"pnl": 0, "trades": 0}, rec.get("v1") or {"pnl": 0, "trades": 0}
         text = (f"📊 **Swing v1.1 · {key}**\nPaper: **{_usd(paper)}** · {len(day)} closed trade{'' if len(day) == 1 else 's'} · {self.mode} mode\n"
-                f"Model v1.1: {_usd(m11['pnl'] * self.ref)} ({m11['trades']} trades)\nModel v1 baseline: {_usd(m1['pnl'] * self.ref)} ({m1['trades']} trades)")
+                f"Model v1.1: {_usd(m11['pnl'] * self.ref)} ({m11['trades']} trades)\nModel v1 baseline: {_usd(m1['pnl'] * self.ref)} ({m1['trades']} trades)"
+                + (f"\n🛑 Stopped early: {rec['halt_why']}" if rec.get("halt_why") else ""))
         try:
             self.report(key, text)
             self.post("system", text, False)
@@ -533,7 +756,10 @@ class Routine:
         rec = self.state.day(today)
         if rec is not None:
             rec["halted"] = True
+            rec["halt_why"] = rec.get("halt_why") or "flatten"
             rec["pending"] = None
+            rec["closed_by"] = "flatten"
+        self.state.ledger["stop"] = None                  # close_all cancels it at Alpaca
         self.state.save()
         if self.mode != "paper":
             return "shadow mode, nothing to close"
@@ -549,4 +775,5 @@ class Routine:
             return f"{self.mode} mode · off today ({rec['skip']})"
         m = rec.get("v11")
         side = {1: "long", -1: "short", 0: "flat"}[m["side"]] if m else "before the open"
-        return f"{self.mode} mode · Swing v1.1 {side} · bar {m['next_bar'] if m else 0}/{BARS}"
+        extra = f" · stopped for today ({rec['halt_why']})" if rec.get("halt_why") else " · no live bars" if rec.get("blind_since") else ""
+        return f"{self.mode} mode · Swing v1.1 {side} · bar {m['next_bar'] if m else 0}/{BARS}{extra}"
