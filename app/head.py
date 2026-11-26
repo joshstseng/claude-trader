@@ -157,7 +157,7 @@ def head_status_text(trade_log: tradelog.TradeLog, now: datetime, session, start
         waiting = [bot_name(b) for b in bots if b not in got]
         lines.append("Today's summary: after 4:15 PM ET, once every bot reports (5:00 PM at the latest)"
                      + (f" · waiting for {', '.join(waiting)}" if waiting and got else ""))
-    lines.append(f"-# deploy {INSTANCE}")
+    lines.append(f"-# deploy {INSTANCE} · code {tradelog.code_version() or 'unknown'}")
     return "\n".join(lines)[:1990]
 
 
@@ -318,6 +318,34 @@ def chunks(text: str, limit: int = 1900) -> list[str]:
     return out
 
 
+VERSION_GRACE_S = 600         # a bot still on older code this long after a newer commit first ran -> ping
+
+
+def versions(trade_log: tradelog.TradeLog) -> dict[str, dict]:
+    out = {}
+    for key, value in trade_log.fleet_prefix("version:"):
+        try:
+            out[key.split(":", 1)[1]] = json.loads(value)
+        except ValueError:
+            continue
+    return out
+
+
+def version_check(trade_log: tradelog.TradeLog, now: datetime, alive: list[str]) -> tuple[str | None, list[str]]:
+    """(the latest commit, live bots still on older code past the grace period)."""
+    vs = {b: v for b, v in versions(trade_log).items() if b in alive and v.get("sha")}
+    if not vs:
+        return None, []
+    seen = {sha: trade_log.fleet(f"version_seen:{sha}") or "" for sha in {v["sha"] for v in vs.values()}}
+    latest = max(seen, key=lambda sha: seen[sha])
+    try:
+        age = (now - datetime.fromisoformat(seen[latest])).total_seconds()
+    except ValueError:
+        return latest, []
+    behind = sorted(b for b, v in vs.items() if v["sha"] != latest) if age >= VERSION_GRACE_S else []
+    return latest, behind
+
+
 WEEKLY_AT = dtime(17, 0)        # the weekly check: after Swing's 4:05 PM record and Bumi's after-close plan
 
 
@@ -398,6 +426,8 @@ def status_text(trade_log: tradelog.TradeLog, now: datetime, session: market.Ses
                  f"Market today {session.open:%-I:%M %p}–{session.close:%-I:%M %p} ET"
                  + (" (early close)" if session.early_close else ""))
     total_risk = 0.0
+    vers = versions(trade_log)
+    latest, _ = version_check(trade_log, now, list(vers))
     for bot in fleet_bots(trade_log, now, day):
         b = beats.get(bot)
         if b is None:
@@ -407,6 +437,8 @@ def status_text(trade_log: tradelog.TradeLog, now: datetime, session: market.Ses
             alive = (f"🟢 {b['note'] or 'running'}" if a <= STALE_S else "🔴 silent") + f" · heard {_ago(a)}"
         n = bot_numbers(trade_log, bot, day)
         total_risk += n["at_risk"]
+        v = vers.get(bot, {}).get("sha")
+        alive += f" · code `{v}`" + (" ⚠️ behind" if v and latest and v != latest else "") if v else ""
         lines.append(f"**{bot_name(bot)}** {alive}\n"
                      f"  today: {n['signals']} signals · {n['alerts']} alerts · {n['orders']} orders · "
                      f"closed {_usd(n['day_pnl'])} · open {n['open']} (at risk ${n['at_risk']:,.2f})")
@@ -561,9 +593,33 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 await self.post(cfg.channel_system, text, ping=ping)
             await self.summary_if_due(now, session)
             try:
+                await self.versions_if_due(now, beats)
+            except Exception:  # noqa: BLE001
+                log.warning("version check failed", exc_info=True)
+            try:
                 await self.weekly_if_due(now)
             except Exception:  # noqa: BLE001 - the weekly check never gets in the way of the watchdog
                 log.warning("weekly check failed", exc_info=True)
+
+        async def versions_if_due(self, now: datetime, beats) -> None:
+            """Ping once when a live bot is still on older code 10 minutes after a newer commit started running,
+            and once when it catches up."""
+            alive = [r["bot"] for r in beats if age_s(r, now) <= STALE_S]
+            latest, behind = await asyncio.to_thread(version_check, self.log, now, alive)
+            warned = getattr(self, "_ver_warned", {})
+            vs = await asyncio.to_thread(versions, self.log)
+            for b in behind:
+                if warned.get(b) != latest:
+                    warned[b] = latest
+                    old = vs.get(b, {}).get("sha")
+                    await self.post(cfg.channel_system, f"⚠️ **{bot_name(b)} is running older code** (`{old}`) than the latest "
+                                    f"deploy (`{latest}`), 10+ minutes after it went out. Its Railway deploy probably failed: "
+                                    f"open {bot_name(b)}'s service in Railway → Deployments, and Redeploy the newest one.", ping=True)
+            for b in [b for b in warned if b not in behind]:
+                if vs.get(b, {}).get("sha") == latest:
+                    await self.post(cfg.channel_system, f"✅ **{bot_name(b)}** is on the latest code now (`{latest}`).")
+                warned.pop(b, None)
+            self._ver_warned = warned
 
         async def weekly_if_due(self, now: datetime) -> bool:
             """On the week's last market day, after WEEKLY_AT, post the paper-vs-model check once."""

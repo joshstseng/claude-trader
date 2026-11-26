@@ -267,12 +267,31 @@ class TradeLog:
 
     def beat(self, bot: str, note: str | None = None, *, name: str | None = None, status: str | None = None) -> None:
         """This bot is alive (the head bot's watchdog reads it), with its Discord name and its /status
-        text when given (the head's /status <bot> shows them)."""
+        text when given (the head's /status <bot> shows them). The first beat also announces the code version."""
+        if bot not in getattr(self, "_announced", set()):
+            self._announced = getattr(self, "_announced", set()) | {bot}
+            try:
+                self.announce_version(bot)
+            except Exception:  # noqa: BLE001 - a version note must never stop a heartbeat
+                pass
         self.db.execute("INSERT INTO heartbeats (bot, at, note, name, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT (bot)"
                         " DO UPDATE SET at = excluded.at, note = excluded.note,"
                         " name = COALESCE(excluded.name, heartbeats.name),"
                         " status = COALESCE(excluded.status, heartbeats.status)", (bot, _now(), note, name, status))
         self.db.commit()
+
+    def announce_version(self, bot: str) -> None:
+        """version:<bot> = the commit this process runs and since when; version_seen:<sha> = when any bot first ran
+        that commit. Uri treats the most recently first-seen commit as the latest (a crash-restart on old code can't
+        look newer)."""
+        import json, os
+        sha = code_version()
+        if not sha:
+            return
+        msg = (os.environ.get("RAILWAY_GIT_COMMIT_MESSAGE") or "").strip().splitlines()
+        self.set_fleet(f"version:{bot}", json.dumps({"sha": sha, "since": _now(), "message": msg[0][:80] if msg else ""}))
+        if self.fleet(f"version_seen:{sha}") is None:
+            self.set_fleet(f"version_seen:{sha}", _now())
 
     def heartbeats(self) -> list:
         return self.db.execute("SELECT * FROM heartbeats ORDER BY bot").fetchall()
