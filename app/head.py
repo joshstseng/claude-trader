@@ -12,6 +12,7 @@ What it does:
     /pause-all      sets the shared global pause (every bot reads it before an alert or an order)
     /resume-all     lifts it (a bot's own /pause stays as it was)
     /flatten-all    global pause + a "flatten" command in the shared database; each bot closes its own
+    /pause-bumi, /resume-bumi, /flatten-bumi   Bumi-only controls through the same commands table
                     account with its own keys and answers; the head reports who did what
     #live-trades    while no bot has a trade open, one light "no live trades" message (a new line each
                     time); deleted within seconds of a trade starting, back when it ends
@@ -758,12 +759,47 @@ def make_head_bot(cfg: HeadSettings, trade_log: tradelog.TradeLog, calendar):
                 text = await self.flatten_all(str(interaction.user.id))
                 await interaction.followup.send(text)
 
+            @tree.command(name="pause-bumi", description="Pause only Bumi: no new orders, positions kept (Swing unaffected)")
+            @owner
+            async def pause_bumi(interaction: discord.Interaction):
+                await interaction.response.defer()
+                await interaction.followup.send(await self.bot_command("pause:bumi", "bumi", str(interaction.user.id)))
+
+            @tree.command(name="resume-bumi", description="Lift Bumi's own pause and its paused new buys")
+            @owner
+            async def resume_bumi(interaction: discord.Interaction):
+                await interaction.response.defer()
+                await interaction.followup.send(await self.bot_command("resume:bumi", "bumi", str(interaction.user.id)))
+
+            @tree.command(name="flatten-bumi", description="KILL SWITCH for Bumi only: sell everything in its account, then pause it")
+            @app_commands.describe(confirm='type "yes" to sell all of Bumi\'s positions now')
+            @owner
+            async def flatten_bumi(interaction: discord.Interaction, confirm: str):
+                if confirm.strip().lower() != "yes":
+                    await interaction.response.send_message(
+                        "Nothing done. Type `/flatten-bumi confirm:yes` to sell all of Bumi's positions.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                await interaction.followup.send(await self.bot_command("flatten:bumi", "bumi", str(interaction.user.id)))
+
             @tree.error
             async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
                 if isinstance(error, app_commands.CheckFailure):
                     await interaction.response.send_message("Only the owner can do that.", ephemeral=True)
                 else:
                     log.exception("slash command failed", exc_info=error)
+
+        async def bot_command(self, command: str, bot: str, by: str, wait_s: float = FLATTEN_WAIT_S, poll_s: float = 2.0) -> str:
+            """One bot's control (e.g. pause:bumi): queued in the shared commands table; that bot carries it out."""
+            cmd = await asyncio.to_thread(self.log.add_command, command, by)
+            deadline = time.monotonic() + wait_s
+            while time.monotonic() < deadline:
+                acks = {a["bot"]: a for a in await asyncio.to_thread(self.log.command_acks, cmd)}
+                if bot in acks:
+                    return f"✅ **{bot_name(bot)}**: {acks[bot]['result'] or 'done'}"
+                await asyncio.sleep(poll_s)
+            return (f"⚠️ **{bot_name(bot)}** didn't answer within {int(wait_s)}s. It will act on it if it's back within 2 minutes; "
+                    "otherwise check its Railway logs, or close positions in its Alpaca account.")
 
         async def flatten_all(self, by: str, wait_s: float = FLATTEN_WAIT_S, poll_s: float = 2.0) -> str:
             await asyncio.to_thread(self.log.set_fleet, "global_pause", "on")

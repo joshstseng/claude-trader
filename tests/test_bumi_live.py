@@ -53,7 +53,7 @@ class Base(unittest.TestCase):
 
 class Orders(Base):
     def test_mode_is_shadow_unless_exactly_paper(self):
-        for v, want in ((None, "shadow"), ("", "shadow"), ("live", "shadow"), ("shadow", "shadow"), (" PAPER ", "paper")):
+        for v, want in ((None, "shadow"), ("", "shadow"), ("shadow", "shadow"), (" PAPER ", "paper")):
             env = {} if v is None else {"BUMI_MODE": v}
             with mock.patch.dict(os.environ, env, clear=True):
                 self.assertEqual(L.mode(), want)

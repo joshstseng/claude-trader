@@ -60,17 +60,20 @@ def _require_int(name: str) -> int:
         raise SettingsError(f"{name} should be a number (a Discord ID), got something else.") from None
 
 
-def alpaca_settings() -> AlpacaSettings:
-    """Alpaca keys. Refuses anything but a paper account (paper only until Step 5)."""
+def alpaca_settings(allow_live: bool = False) -> AlpacaSettings:
+    """Alpaca keys. Refuses anything but a paper account, unless the caller is Bumi in confirmed live mode
+    (allow_live, which bumi_live.mode() only grants when BUMI_MODE=live and BUMI_LIVE_CONFIRM match)."""
     paper = os.environ.get("ALPACA_PAPER", "true").strip().lower()
     if paper != "true":
-        raise SettingsError(
-            "ALPACA_PAPER must be true. Live trading is locked until Step 5 of the roadmap."
-        )
+        if not (allow_live and paper == "false"):
+            raise SettingsError(
+                "ALPACA_PAPER must be true. Only Bumi can trade a live account, and only with BUMI_MODE=live "
+                "and BUMI_LIVE_CONFIRM set."
+            )
     return AlpacaSettings(
         api_key=_require("ALPACA_API_KEY"),
         secret_key=_require("ALPACA_SECRET_KEY"),
-        paper=True,
+        paper=paper == "true",
     )
 
 

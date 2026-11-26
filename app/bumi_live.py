@@ -32,8 +32,35 @@ CASH_BUFFER = 0.005            # sizes buys slightly under target, so a gap up c
 STATE_FILE = paths.bot_dir("bumi") / "data" / "bumi_state.json"
 
 
+ORDERS = ("paper", "live")          # the modes that send orders
+LIVE_CONFIRM = "real-money"
+
+
 def mode() -> str:
-    return "paper" if (os.environ.get("BUMI_MODE") or "").strip().lower() == "paper" else "shadow"
+    """paper, live or shadow. Live needs three settings to agree, so one wrong value can't trade real money:
+    BUMI_MODE=live, ALPACA_PAPER=false and BUMI_LIVE_CONFIRM=real-money. A partial live setup refuses to start."""
+    m = (os.environ.get("BUMI_MODE") or "").strip().lower()
+    if m == "live":
+        from app.settings import SettingsError
+        if (os.environ.get("ALPACA_PAPER") or "").strip().lower() != "false" or \
+                (os.environ.get("BUMI_LIVE_CONFIRM") or "").strip() != LIVE_CONFIRM:
+            raise SettingsError(f"BUMI_MODE=live also needs ALPACA_PAPER=false and BUMI_LIVE_CONFIRM={LIVE_CONFIRM}. "
+                                "Bumi did not start.")
+        return "live"
+    return "paper" if m == "paper" else "shadow"
+
+
+def size_fraction() -> float:
+    """BUMI_SIZE_FRACTION: trade as if the account were this share of its size (0.25 to start live). Default 1."""
+    raw = (os.environ.get("BUMI_SIZE_FRACTION") or "1").strip()
+    try:
+        f = float(raw)
+    except ValueError:
+        f = -1.0
+    if not 0 < f <= 1:
+        from app.settings import SettingsError
+        raise SettingsError(f"BUMI_SIZE_FRACTION must be above 0 and at most 1, got {raw!r}")
+    return f
 
 
 def load_settings() -> dict:
@@ -73,14 +100,14 @@ class State:
 
 
 class AlpacaBumi:
-    """Bumi's own paper account."""
+    """Bumi's own account: paper, or live only when mode() is "live"."""
 
-    def __init__(self):
+    def __init__(self, live: bool = False):
         from alpaca.trading.client import TradingClient
         from app import settings
         settings.load_env()
-        a = settings.alpaca_settings()                 # refuses anything but paper
-        self.t = TradingClient(a.api_key, a.secret_key, paper=True)
+        a = settings.alpaca_settings(allow_live=live)  # refuses a live account unless Bumi is in confirmed live mode
+        self.t = TradingClient(a.api_key, a.secret_key, paper=a.paper)
 
     def equity(self) -> float:
         return float(self.t.get_account().equity)
@@ -172,15 +199,23 @@ def decide(plan: dict, s: dict, state: State, closes: dict[str, float], run_mode
     day = plan["as_of"]
     if state.day(day):
         return state.day(day)
-    if run_mode == "paper":
-        equity, held = broker.equity(), broker.positions()
+    if run_mode in ORDERS:
+        equity, held = broker.equity() * size_fraction(), broker.positions()
     else:
         held = dict(state.doc["virtual"])
         equity = float(s["account"]["size_usd"])
     orders, notes = build_orders(plan, s, equity, held, closes, state.doc["core"])
+    if state.doc.get("buys_paused") and any(o.side == "buy" for o in orders):
+        orders = [o for o in orders if o.side != "buy"]
+        notes.append(f"new buys paused ({state.doc['buys_paused']}); sells still run. Resume with /resume-bumi")
+    after = sum(q * closes.get(u, 0) for u, q in held.items())
+    after += sum((o.qty if o.side == "buy" else -o.qty) * closes.get(o.sym, 0) for o in orders)
+    if after > equity * 1.02:                          # the account never borrows: a plan above that is a bug
+        orders = [o for o in orders if o.side != "buy"]
+        notes.append(f"sanity check: the plan would hold ${after:,.0f} with ${equity:,.0f} to use, so buys were dropped")
     rec = {"plan": plan, "orders": [asdict(o) for o in orders], "notes": notes, "mode": run_mode, "sent": False,
            "confirmed": False, "closes": closes, "next_core": plan["targets"].get(s["core"]["symbol"], 0.0)}
-    if run_mode != "paper":                            # shadow keeps a virtual book, so its sells have shares
+    if run_mode not in ORDERS:                         # shadow keeps a virtual book, so its sells have shares
         for o in orders:
             q = held.get(o.sym, 0) + (o.qty if o.side == "buy" else -o.qty)
             if q > 0:
@@ -199,7 +234,7 @@ def send(prev_session: str, now: datetime, state: State, run_mode: str, broker=N
     rec = state.day(prev_session)
     if rec is None:
         return [f"no plan for {prev_session}, nothing sent"]
-    if run_mode != "paper" or rec.get("mode") != "paper":
+    if run_mode not in ORDERS or rec.get("mode") not in ORDERS:
         return ["shadow mode, nothing sent"]
     if rec["sent"]:
         return ["already sent"]
@@ -323,7 +358,7 @@ def reconcile(state: State, broker, s: dict, today: str) -> list[str]:
 def confirm(prev_session: str, state: State, broker, fill_day: str | None = None, s: dict | None = None) -> list[str]:
     """After the open: every order filled in full? Books the fills. Returns the problems (empty is clean)."""
     rec = state.day(prev_session)
-    if rec is None or rec.get("mode") != "paper" or not rec["sent"]:
+    if rec is None or rec.get("mode") not in ORDERS or not rec["sent"]:
         return []
     problems = []
     for o in rec["orders"]:
@@ -350,7 +385,7 @@ def flatten(state: State, run_mode: str, broker=None) -> str:
         if not rec["sent"]:
             rec["cancelled"] = True
     state.doc["core"] = 0.0
-    if run_mode != "paper":
+    if run_mode not in ORDERS:
         state.doc["virtual"] = {}
         state.save()
         return "shadow mode, nothing to close"
@@ -373,3 +408,32 @@ def align(bars_by_sym: dict[str, list[D]], vix_series: dict[date, float], expect
         last = vix_series.get(d, last)
         vix.append(last)
     return out, vix, vix_ok and expect in vix_series
+
+
+def track_equity(state: State, day: str, equity: float, fraction: float, s: dict) -> tuple[str, str] | None:
+    """Once a day after the close: Bumi's return on the money it trades (equity change / (equity x fraction)), a running
+    index and its peak. Returns (kind, text) when you should hear about it, else None.
+        bad_day    a day worse than bad_day_pct (never happened since 2001): pauses NEW buys until /resume-bumi
+        drawdown   down drawdown_pct from the peak (about once every 5 years in the backtest): an alert only, Bumi keeps
+                   trading; one alert per slide, re-armed at the next new peak
+    Bumi never sells because of either; its own exits do the selling."""
+    r = s.get("risk") or {}
+    t = state.doc.setdefault("equity_track", {"last_day": None, "last_equity": None, "index": 1.0, "peak": 1.0})
+    if t["last_day"] == day or equity <= 0:
+        return None
+    alert = None
+    if t["last_equity"]:
+        ret = (equity - t["last_equity"]) / (t["last_equity"] * fraction)
+        t["index"] *= 1 + ret
+        if t["index"] >= t["peak"]:
+            t["peak"], t["dd_alerted"] = t["index"], False
+        dd = t["index"] / t["peak"] - 1
+        if ret <= -r.get("bad_day_pct", .08) and not state.doc.get("buys_paused"):
+            alert = ("bad_day", f"a {ret:.1%} day on the money Bumi trades (alert at -{r.get('bad_day_pct', .08):.0%})")
+            state.doc["buys_paused"] = alert[1]
+        elif dd <= -r.get("drawdown_pct", .15) and not t.get("dd_alerted"):
+            alert = ("drawdown", f"down {-dd:.1%} from its peak (alert at -{r.get('drawdown_pct', .15):.0%})")
+            t["dd_alerted"] = True
+    t["last_day"], t["last_equity"] = day, equity
+    state.save()
+    return alert
