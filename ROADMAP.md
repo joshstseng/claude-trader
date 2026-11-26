@@ -151,6 +151,15 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 
 **Gate:** ongoing. Results are reviewed regularly against the backtest, and the app pauses itself when the daily loss limit is hit.
 
+**Bumi + Swing live setup (chosen 2026-11-25):** two accounts sized off one total. Bumi on an Alpaca account with about 75% of the money; Swing v1.1 on MNQ futures at a futures broker with about 25% as margin, sized off the full total. Bumi goes live first at about 25% of its size after 2-3 clean paper months; Swing follows once a funded futures account and its risk pack (resting stop, daily loss limit, contract cap, hard flatten, disconnect rule) are ready. Scale up only while live matches paper and the backtest.
+
+### Step 5b: Uri as the money manager (build when Swing goes live on futures; remind the user then)
+Added to Uri, not a new bot:
+1. **Rebalance advisor:** at each month end, post how much to move between the Alpaca and futures accounts to restore 75/25; alert early if Swing's margin runs low or the split drifts more than about 10 points. **You move the money yourself;** Uri then confirms both accounts see it.
+2. **Broker and API health:** check both brokers' APIs, market data and account status during market hours; alert on outages, stuck orders, position mismatches or a quiet bot.
+3. **Money view:** combined P&L daily, weekly and monthly; each bot's drawdown vs its backtest worst; a weekly "still matching the backtest?" report.
+4. **Combined risk:** a fleet-wide daily loss limit that pauses both bots.
+
 ---
 
 ## Decisions log
@@ -175,6 +184,7 @@ Status key: ⬜ Not started · 🟨 In progress · ✅ Done
 | 2026-11-17 | Step 1b uses **free live data only** (measure Alpaca IEX vs Yahoo first; TradingView CME/COMEX can't be used: futures, no API) and moves the live bot onto the **backtest's engine** |
 | 2026-11-17 | Backtest baseline and Step 1b both use a **cash limit**: the $5k account can't use margin, so usually one ~$3.5k position at a time |
 | 2026-11-17 | Backtest framework started in parallel with the Step 1a live gate (assumed cost 0.03%/side until Step 1b's real fills). Baseline: Nov 2024 → Nov 2026, live v1 settings, cap 5 first come first served; ranking tested later |
+| 2026-11-25 | **Bumi + Swing live plan:** Bumi on Alpaca (~75%), Swing v1.1 on MNQ futures (~25% margin, sized off the total), monthly rebalance. **Step 5b** adds rebalance advice, broker health, combined P&L and a fleet loss limit to Uri when Swing goes live on futures |
 | 2026-11-17 | Step 1a v1 settings: focus list = top ~150 most traded over $5 plus daily-scan hits; scan window 9:50–11:30 AM; trigger bar volume ≥ 1.0×; at most 5 alerts a day; stop at range midpoint, target 2R; $5k account / $50 max loss / $150 daily loss limit / 3 trades a day; shared Discord channels tagged `[ORB]` |
 
 ---

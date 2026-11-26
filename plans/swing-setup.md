@@ -8,16 +8,16 @@ Swing v1.1 is a **new, separate bot**. It trades QQQ on its own **$100,000 Alpac
 
 ## Your checklist
 
-- [ ] **Step 1.** Create the Swing Discord bot (5 min)
-- [ ] **Step 2.** Create the Swing Alpaca paper account (3 min)
-- [ ] **Step 3.** Tell Claude **"Parts 1 and 2 are done"**
-- [ ] *Claude pushes the code and checks Orbi, Uri and Bumi*
-- [ ] **Step 4.** Create the Swing Railway service (10 min), after Claude says **"ready for Railway"**
-- [ ] **Step 5.** Confirm Swing is online
-- [ ] **Step 6.** Make sure the fleet isn't paused
-- [ ] **Step 7.** Check its first trading day
+- [x] **Step 1.** Create the Swing Discord bot
+- [x] **Step 2.** Create the Swing Alpaca paper account
+- [x] **Step 3.** Tell Claude **"Parts 1 and 2 are done"**
+- [x] *Claude pushed the code (`307f2ca`) on 2026-11-22. Orbi, Uri and Bumi are back online*
+- [x] **Step 4.** Create the Swing Railway service
+- [x] **Step 5.** Swing is online in paper mode (checked 2026-11-22, 3:53 PM ET)
+- [x] **Step 6.** The global pause is off
+- [ ] **Step 7.** Check its first trading day: **Monday, Nov 23, 2026**
 
-**To trade Monday:** finish Steps 1–6 before **6:00 AM PT / 9:00 AM ET Monday**.
+**Thanksgiving week:** markets are closed Thursday, Nov 26. Friday, Nov 27 is a shortened session, so Swing stays off that day by design.
 
 ---
 
